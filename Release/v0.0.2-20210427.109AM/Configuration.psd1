@@ -1,0 +1,60 @@
+@{
+  ConfigVersion                   = 0.1
+  MSE_AutomationRoot              = "C:\MSEAutomation"
+  MSE_UtilityDir                  = "Utility"                  
+  MSE_ScriptDir                   = "Scripts"
+  MSE_ConfigDir                   = "Config"
+  MSE_LogDir                      = "Logs"
+  MSE_HashFileDir                 = "Secure"
+  MSE_KeePassExecDir              = "Utility\KeePass"
+  MSE_SigCheckDir                 = "Utility\sigcheck"
+  MSE_PlantCountry                = "US"
+  MSE_PlantCode                   = "USSLO"
+  MSE_PlantAddress1               = "Thermo Fisher Scientific"  
+  MSE_PlantAddress2               = "4766 LaGuardia Dr."        
+  MSE_PlantCity                   = "St. Louis"                 
+  MSE_PlantState                  = "Missouri"                     
+  MSE_PlantZIP                    = "63134-3177"                   
+  MSE_PlantPhone                  = "314-426-5000"                 
+  MSE_PlantTimeZone               = "CST"                          
+  MSE_PlantOTEmail                = "USSLO.MSE.Automation@thermofisher.com"
+  MSE_BusDomainNT                 = "AMER"
+  MSE_MfgDomainNT                 = "STLMPN"
+  MSE_BusDomain                   = "amer.thermo.com"
+  MSE_MfgDomain                   = "stlmpn.amer.thermo.com"
+  MSE_MfgLDAPRoot                 = "dc=stlmpn,dc=amer,dc=thermo,dc=com"
+  MSE_BusLDAPRoot                 = "dc=amer,dc=thermo,dc=com"
+  MSE_MfgDC01Name                 = "USSLO-DC01-MERA"
+  MSE_MfgDC01IP                   = "10.175.129.20"
+  MSE_BusDC01Name                 = "USSLO-DC01-MERA"
+  MSE_BusDC01IP                   = "10.175.129.20"
+  MSE_LDAPGxPContainer            = ""
+  MSE_LDAPBusContainer            = ""
+  MSE_LDAPAWSContainer            = ""
+  MSE_MailGateway                 = "USSLO-MSE-MailGW"
+  MSE_PSRepository                = "\\usslo-mpn-NAS01.thermo.com\MSE-Automation-Equip\PowerShellRepository"
+  MSE_AutoFileRepo                = "\\usslo-mpn-NAS01.thermo.com\MSE-Automation-Equip\AutomationFileRepsitory"
+  MSE_BatchRecBURoot              = "\\usslo-awssgw-p1.thermo.com\batch-record"
+  MSE_EqImageBURoot               = "\\usslo-awssgw-p1.thermo.com\equip-image-backups"
+  MSE_EqDataRepoBURoot            = "\\usslo-awssgw-p1.thermo.com\data-resource-backups"
+  MSE_ServiceKeePassFile          = "\\usslo-mpn-NAS01.thermo.com\MSE-Automation-Equip\KeePassRepo\MSEServiceAccounts.kdbx" 
+  MSE_SQL_DBServer                = "USSLO-MSE-DB01"
+  MSE_SQL_DB                      = "MSEAutomation"
+  MSE_adOpenStatic                = 3
+  MSE_adLockOptimistic            = 3
+  MSE_DisallowedPWChars           = @{
+              1 = 34
+              2 = 36
+              3 = 39
+              4 = 44
+              5 = 45
+              6 = 46
+              7 = 47
+              8 = 59
+              9 = 61
+             10 = 92
+             11 = 96 
+             12 = 104
+             13 = 126
+             }
+}

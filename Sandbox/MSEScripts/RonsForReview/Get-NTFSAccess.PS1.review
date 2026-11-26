@@ -1,0 +1,247 @@
+# function Get-ntfsAccess { 
+    <# 
+    .SYNOPSIS 
+    Find directories one or more users or groups have access to 
+     
+    .DESCRIPTION 
+    Find directories one or more users or groups have access to 
+ 
+    By default, returns the Directory, User/Group, FileSystemRights, AccessControlType, IsInhereted, InheretanceFlags and PropagationFlags for these folders 
+     
+    .PARAMETER paths 
+    One ore more paths to recursively search through for access 
+ 
+    .PARAMETER entity 
+    One or more groups or users to check access for. 
+    If no prefix (e.g. DOMAIN\, BUILTIN\, hostname\) is specified, domain is assumed 
+ 
+    Examples: 
+    "BUILTIN\ADMINISTRATORS", "HOSTNAME\LocalUserName" "DOMAIN\JSmith", "DOMAIN\Group 1", "Group 1" 
+ 
+    .PARAMETER recurseGroups 
+    If specified, recursively search for AD access.  If a group is specified, all nested groups are included.  If a user is specified, all groups in their memberof and nested groups for these are included. 
+ 
+    .PARAMETER noAccess 
+    If specified, return list of folders that specified groups do not have access to. 
+ 
+    .PARAMETER listOnly 
+    If specified, return only the list of folders with ACLs for the specified groups, without details on the access 
+ 
+    .PARAMETER Files 
+    If specified, also check ACLs for files 
+ 
+    .EXAMPLE 
+    Get-ntfsAccess -path C:\share -entity DOMAIN\USER, 'DOMAIN\GROUP NAME', BUILTIN\Administrators | ft -autosize 
+ 
+    Return all subfolders of C:\share with ACLs for domain\user, domain\group name or builtin\administrators.  Include access details. 
+     
+    .EXAMPLE 
+    Get-ntfsAccess -path \\path\to\share -entity DOMAIN\USER -noAccess 
+ 
+    Return list of subfolders under \\path\to\share that domain\user does NOT have access to 
+     
+    .EXAMPLE 
+    Get-ntfsAccess -path \\path\to\share -entity DOMAIN\USER -listOnly 
+ 
+    Return a list of all folders under \\path\to\share that domain\user has access to. 
+ 
+    .EXAMPLE 
+    Get-ntfsAccess -path C:\temp -entity "DOMAIN\GROUP NAME" -recurseGroups 
+ 
+    Return all subfolders of C:\temp that DOMAIN\GROUP NAME and any group nested under this group have access to 
+     
+    .FUNCTIONALITY 
+    Computers 
+    #> 
+    [CmdletBinding()] 
+    Param 
+    ( 
+        [ValidateScript( {test-path $_} )] 
+            [string[]]$paths = "C:\temp", 
+         
+        [string[]]$entity = "builtin\Administrators", 
+         
+        [switch]$recurseGroups, 
+ 
+        [switch]$listOnly, 
+ 
+        [switch]$noAccess, 
+         
+        [switch]$files 
+    ) 
+ 
+    Import-Module ActiveDirectory
+ 
+    #Simple function to get nested AD groups 
+    function Get-NestedGroups { 
+        [CmdletBinding()] 
+        param($ADObject = "", $nestLevel = $null) 
+ 
+        #By default we will look at groups 
+        $group = $true 
+        $domain = (get-ADDomain).name 
+        if($ADObject -match "$domain\\"){ 
+            $ADObject = $AdObject -Replace "$domain\\", "" 
+        } 
+ 
+        #If nestlevel is an int, we are recursing.  set nestLevel for verbose output 
+        if( $nestLevel -is [int] ) { 
+            $nestLevel++ 
+            $tabs = "`t" * $nestLevel 
+            if($nestlevel -eq 10){ read-host "Reached 10 nest levels - there might be an issue!" } 
+        } 
+ 
+        #if nestLevel isn't an integer, this is the first run. 
+        else{ 
+            $nestLevel = 1 
+ 
+            #For the first round, we want to cover other AD objects potentially.  Get Details on the ADObject! 
+            $ADObjectDetails = Get-ADObject -filter "samAccountName -eq '$ADObject'" -Properties memberOf 
+ 
+            #If it isn't a group 
+            if(($ADObjectDetails).ObjectClass -ne "group") 
+            { 
+                #It's not a group, so don't run the group query later in the script 
+                $group = $false 
+ 
+                #get memberof property (dn) and convert to samaccountnames 
+                $subGroups = @() 
+                $ADObjectDetails | select -expand memberof | foreach { 
+                        $subGroups += Get-adgroup $_ | select -ExpandProperty samaccountname 
+                } 
+            } 
+        } 
+ 
+        #If ADObject was a group, get the sub groups 
+        if($group){  $subGroups = (Get-ADGroupMember -Identity $ADObject | ?{$_.objectClass -like "group"}).samAccountName  } 
+        Write-Verbose "$tabs Level $nestLevel $ADObject QUERY RESULTS:`n$( $subgroups | out-string) " 
+ 
+        #If there are sub groups, recurse through them 
+        if($subGroups){ 
+ 
+            #add results of current query 
+            $allNestedGroups = [string[]]$subGroups 
+         
+            #initialize subSubgroupscollection 
+            $subSubGroupsCollection = [string[]]"" 
+ 
+            #look for subsubgroups in each sub group 
+            foreach($subgroup in $subgroups){ 
+                #Run query, return query results for verbose output, then add it to a collection 
+                $subSubGroups = Get-NestedGroups -ADObject $subgroup -nestLevel $nestLevel 
+                if($subSubGroups){ write-verbose "$tabs Level $nestLevel $subgroup returned the following groups:`n$( $subSubGroups | out-string)" } 
+                $subSubGroupsCollection += $subSubGroups 
+            } 
+         
+            #add results from subgroups only if they aren't blank or already included 
+            $allNestedGroups += $subSubGroupsCollection | ?{$_ -and $allNestedGroups -notContains $_} 
+ 
+        } 
+ 
+        else{ 
+            #If we hit an empty group, return with nothing 
+            Return 
+        } 
+ 
+        #Once we've recursed through all groups, return results 
+        Write-Verbose "$tabs Level $nestLevel Returning from $ADObject with following nestedGroups:`n$( $allNestedGroups | Out-String)" 
+        $allNestedGroups 
+    } 
+     
+    #recurse Groups 
+    if($recurseGroups){ 
+        Write-Verbose "Querying for groups under $($entity -join "; ")" 
+        $domain = (get-ADDomain).name 
+        $newGroups = @() 
+ 
+        #add existing groups 
+        $newGroups += $entity 
+         
+        #add nested groups - only run this if domain prefix or no prefix are specified (i.e. skip BUILTIN\blah) 
+        Foreach($group in $($entity | ?{ $_ -match "$domain\\" -or $_ -notmatch "\\"})){  
+             
+            #Get-NestedGroups uses the default domain, remove the prefix if there is one 
+            $newGroups += Get-NestedGroups $group 
+        } 
+         
+        #if no domain is specified, add current domain as prefix 
+        $entity = $newGroups | where {$_} | foreach { 
+            if ($_ -notmatch "\\") { "$domain\$_" } 
+            else{$_} 
+        } 
+         
+        Write-Verbose "New groups: $($entity -join "; ")" 
+    } 
+ 
+    #set parameters for get-childitem 
+    $gciProperties = @{ Recurse = $true } 
+    if(-not $files) { $gciProperties += @{directory = $true} } 
+ 
+    #Get a list of folders to test 
+    $folderList = @() 
+    $folderResults = @() 
+    foreach($path in $paths){  $folderList += (get-childitem @gciProperties -path $path).fullname  } 
+    Write-Verbose "Testing $($folderList.count) Files or Folders" 
+     
+    #Loop through each folder 
+    foreach($folder in $folderlist){ 
+         
+        #Get ACL for the folder 
+        write-verbose "Checking access for $folder" 
+        $accessList = (get-acl $folder).access 
+         
+        #Set access to null - used for determining noAccess 
+        $access = $null 
+ 
+        #For each access item in the ACL 
+        foreach($accessItem in $accessList){ 
+             
+            #Identify the group and track overall access for -noaccess parameter 
+            $accessItemGroup = $accessItem.IdentityReference.Value 
+ 
+            #loop through groups we are searching for 
+            foreach($group in $entity) 
+            { 
+                #if we match a group... 
+                if($accessItemGroup -like $group) 
+                { 
+                    #add it to a list, if listOnly or noAccess 
+                    if($listOnly) 
+                    { 
+                        #add the result unless $noAccess is specified 
+                        if(-not $noAccess){ $folderResults += $folder } 
+                        $access = 1 
+                        write-verbose "Access for $folder" 
+                    } 
+                    #otherwise, add an object with access information to results 
+                    else 
+                    {  
+                        #add the result unless $noAccess is specified 
+                        if(-not $noAccess){ 
+                            $folderResults += [pscustomobject] @{ 
+                                Path = $folder; 
+                                Group = $accessItemGroup; 
+                                FileSystemRights = $accessItem.FileSystemRights; 
+                                AccessControlType = $accessItem.AccessControlType; 
+                                IsInherited = $accessItem.isInherited; 
+                                InheritanceFlags = $accessItem.InheritanceFlags; 
+                                PropagationFlags = $accessItem.PropagationFlags 
+                            } 
+                        } 
+                        $access = 1 
+                        write-verbose "Access for $folder" 
+                    } 
+                } 
+            } 
+        } 
+ 
+        #if we didn't find a group matching input, $access is still $null 
+        if(-not $access -and $noAccess){ 
+            $folderResults += $folder 
+            write-verbose "No access for $folder" 
+        } 
+ 
+    } 
+ 
+    $folderResults 
+# }

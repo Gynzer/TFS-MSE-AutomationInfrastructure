@@ -1,0 +1,170 @@
+#------------------------------------------------------------------------
+# PopulateLocalGroups.ps1
+# NPPC FAS Project User Creation Script (Step 2)
+# Author: Ron Gines
+# Version History
+#      3.0  -  Complete Rewrite using PoweShell instead of VBScript
+#              Date:    August 14, 2013
+#
+#      2.0  -  Complete Rewrite 
+#              Date:    January 19, 2007
+#
+#   This script will populate local groups on the local system.  The prior 
+#   step created the local groups.  The local groups are now populated with  
+#   groups from the Active Directory OU.
+#
+#   For MES Cluster installations:
+#   Must be run once on each side of the cluster node. 
+#
+#   The user running this command must have access to both the local 
+#   server as an admin and be able to query the AD tree with permission to 
+#   read and write into the plants portion of the LMS branch.
+#
+#   This script is self-contained with the exception of the input
+#   file.   There are no other include files or requirements.
+#
+# Configuration:
+#
+#   Edit the section with the neader of 'PLANTS EDIT HERE'
+#
+#
+# Input:  
+#
+#   Populate LOcal Group CSV file
+#      Local Server Group Name
+#      Domain Group Name to be added 
+#
+#----------------------------------------------------------------------
+
+[CmdletBinding()]
+param(
+   [String]$Help,
+   [String]$FilePath = ".\MSE_PopulateLocalGroups.csv",
+   [String]$Computer = $env:COMPUTERNAME
+)
+
+#==============================================================================
+# DEFINE Variables and Objects
+#==============================================================================
+#
+#==============================================================================
+#                     PLANTS EDIT  HERE
+#==============================================================================
+#Variables Requiring Editing At Each Plant Implementation - EDIT HERE -
+#==============================================================================
+$LDAPContainerName  = "ou=US-StLouis-HQ,ou=LMS Users and Groups,ou=NPPC AMS,ou=AMS,ou=Organizations,dc=nestle,dc=com"
+$DomainRoot         = "dc=nestle,dc=com"
+$DomainDNSName      = "nestle.com"
+$DomainNTName       = "NESTLE"
+#==============================================================================
+#==================================================================
+#               DO NOT EDIT BELOW THIS LINE
+#==================================================================
+#==============================================================================
+
+
+#==============================================================================
+# FUNCTIONS
+#==============================================================================
+
+#==============================================================================
+function funHelp()
+{
+$helpText=@"
+DESCRIPTION:
+NAME: CreateLocalGroup.ps1
+Creates a local group on either a local or remote machine.
+
+PARAMETERS:
+-Computer  Specifies the name of the computer upon which to run the script
+-Help      Prints help file
+-FilePath  Specifies the path to the config file to be used
+             (defaults to - ".\MSE_PopulateLocalGroups.csv")
+
+SYNTAX:
+PopulateLocalGroup.ps1 -FilePath <file location> -Computer <computer to create groups on> -Help <DisplaysHelp>
+Generates an error.  Displays Help File.
+
+EXAMPLES:
+PopulateLocalGroup.ps1 -Computer TestbedServer
+Populates local groups from the default CSV file on the machine TestbedServer 
+
+PopulateLocalGroup.ps1 -FilePath .\CreateLocalGroup.csv
+Populate Local Groups based on the information in "PopulateLocalGroup.csv"
+
+PopulateLocalGroup.ps1 -help ?
+Displays the help topic for the script
+
+"@
+$helpText
+exit
+}
+
+
+#==============================================================================
+function MSEPopulateLocalGroup()
+{
+Write-Verbose "Adding the group $Group on computer $Computer with Domain Group $DomainGroup."
+try {
+    $de = [ADSI]"WinNT://$Computer/$Group,group"
+    $de.psbase.Invoke("Add",([ADSI]"WinNT://$DomainNTName/$DomainGroup").path)
+    Write-Verbose "Populated the group $Group on computer $Computer with Domain Group $DomainGroup."
+    Write-EventLog -Logname Application -Source "MSE-Scripts" -EntryType Information 1 -Message  "PopulateLocalGroups: Populated the group $Group on computer $Computer with Domain Group $DomainGroup."
+    } catch {
+    Write-EventLog -Logname Application -Source "MSE-Scripts" -EntryType Error 99 -Message  "PopulateLocalGroups: Error populating the group $Group on computer $Computer with Domain Group $DomainGroup."
+    }    
+}
+
+
+
+#==============================================================================
+#  MAIN CODE
+#==============================================================================
+
+if ([System.Diagnostics.EventLog]::SourceExists("MSE-Scripts"))
+{
+    Write-Verbose  "Source 'MSE-SCripts' exists."
+}
+else
+{
+    New-EventLog -LogName Application -Source "MSE-Scripts"
+    Write-Verbose  "Source 'MSE-SCripts' Created."
+}
+
+Write-EventLog -Logname Application -Source "MSE-Scripts" -EntryType Information 1 -Message "PopulateLocalGroups: Script CreateLocalGroups is starting."
+
+Write-Verbose  "Computer:      $Computer"
+Write-Verbose  "Group:         $Group"
+Write-Verbose  "Help:          $Help"
+Write-Verbose  "FilePath:      $FilePath"
+Write-Verbose  "DomainGroup:   $DomainGroup"
+
+if($Help){ "Obtaining help ..." ; funhelp }
+
+if(Test-path $FilePath)
+{
+    Write-EventLog -Logname Application -Source "MSE-Scripts" -EntryType Information 1 -Message "PopulateLocalGroups: File $FilePath exists."
+    Write-Verbose  "File $FilePath exists."
+    $GroupList = import-csv $FilePath 
+    foreach ($GroupLine in $GroupList)
+    {
+        $Group = $GroupLine.LocalGroupName
+        $DomainGroup  = $GroupLine.DomainGlobalGroup
+        MSEPopulateLocalGroup
+        Write-Verbose  "Computer:      $Computer"
+        Write-Verbose  "GroupLine:     $GroupLine"
+        Write-Verbose  "Group:         $Group"
+        Write-Verbose  "DomainGroup:   $DomainGroup"
+    }
+    Write-Host  "Groups Populated"
+}
+else
+{
+    Write-EventLog -Logname Application -Source "MSE-Scripts" -EntryType Error 99 -Message "PopulateLocalGroups: File $FilePath does not exist."
+    Write-Verbose  "File $FilePath does not exist."
+    Write-Host  "File " $FilePath " does not exist."
+    exit
+}
+
+
+ 

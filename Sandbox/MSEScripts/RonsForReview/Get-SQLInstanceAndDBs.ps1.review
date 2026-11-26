@@ -1,0 +1,19 @@
+﻿# get-SQLInstanceAndDBs.ps1
+#
+# Just a quick and dirty script that will pull the instance and databases from an SQL server.
+# We took some cheap shortcuts, os it may not work in every environment, but should work for most.
+# .. and yep, most of it is stolen from several different places on the web.   ... so no I am not great.   Just average.
+# Ron Gines - 20180117
+
+$SQLServer = Read-Host -Prompt "Enter the database server name (w/o instance)"
+$SQLService = Get-WmiObject -ComputerName $SQLServer win32_service -Filter "state = 'Running'"| where {$_.name -like "MSSQL$*"}  #Find instance info from services.
+$SQLInstance = $($SQLService.name) #Set name
+$SQLInstanceName = $SQLInstance.substring(6) ##Remove MSSQL$ from service name. 
+write-output "Powershell output- SQL Instance Name is: $($SQLInstanceName)"
+
+$FullName = ($SQLServer + "\" + $SQLInstanceName)
+$s = New-Object ('Microsoft.SqlServer.Management.Smo.Server') $FullName
+$dbs=$s.Databases
+# Other data available .....
+# $dbs | SELECT Name, Collation, CompatibilityLevel, AutoShrink, RecoveryModel, Size, SpaceAvailable
+$dbs | select Name

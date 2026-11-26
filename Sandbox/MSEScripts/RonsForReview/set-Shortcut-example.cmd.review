@@ -1,0 +1,3 @@
+.\set-shortcut.ps1 "G:\MESAPPS\batching\carma\cmd\carma.exe" "USSTLPPV102" "$Home\Desktop\Carma-102.lnk"
+
+REM Need to specify "start In" parameter.

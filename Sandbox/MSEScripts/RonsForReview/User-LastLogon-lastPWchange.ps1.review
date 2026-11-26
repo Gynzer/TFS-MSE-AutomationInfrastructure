@@ -1,0 +1,84 @@
+Function User-LastLogon_LastPWChange
+{
+[CmdletBinding()]
+param(
+  [string[]]$UserNameListFile
+)
+$Global:VersionObjFull  = @()
+$UserNameList           = @()
+
+Import-Module ActiveDirectory
+
+If ($UserNameListFile -eq $null)
+   {
+      $UserNameList = (Read-Host "Enter User Names (separated by comma)").split(',') | % {$_.trim()}
+   }
+else
+   {
+      Import-csv $UserNameListFile | ForEach-Object {$UserNameList += $_.UserName}
+   }
+
+$UserNameListFile
+$UserNameList
+function Get-ADUserLastLogon([string]$userName)
+  {
+    $dcs = Get-ADDomainController -Filter {Name -like "USSTL*"}
+    $time = 0
+    foreach($dc in $dcs)
+      { 
+        #    $hostname = "USSTLB0005.nestle.com"
+        $hostname = $dc.HostName
+# Stupid entry to take care of a server that is not working right .. shouldn't be needed
+        if($hostname -eq "USSTLB0013.nestle.com"){continue}
+        $userlogon = Get-ADUser -Identity $userName -properties lastlogon -Server $hostname
+        $TempTime = $userlogon.LastLogon
+        if($userlogon.LastLogon -gt $time) 
+        {
+          $time = $userlogon.LastLogon
+        }
+      }
+    $dt = [DateTime]::FromFileTime($time)
+    $userpw = Get-ADUser -Identity $userName -properties passwordlastset, enabled
+    if ($userpw.enabled -eq $true)
+      {
+        Write-Host $username "last logged on at:" $dt "Password last set on :" $userpw.passwordlastset " and account is enabled."
+      }
+    else
+      {
+        Write-Host $username "last logged on at:" $dt "Password last set on :" $userpw.passwordlastset " and account is disabled."
+      }
+
+    $UserInfo = @{
+                 'UserName' = $UserName;
+                 'LastLogon' = $dt;
+                 'PasswordReset' = $userpw.passwordlastset
+                 'Enabled' = $userpw.enabled
+                 }
+
+    $VersionObj = New-Object -TypeName PSObject -Property $UserInfo
+    Write-Debug "About to dump output ... Get ready."
+    Write-Debug $VersionObj
+    $VersionObj.psobject.typenames.insert(0,'Custom.User.Output.Thing')
+    $Global:VersionObjFull += $VersionObj
+  }
+
+############## MAIN SCRIPT
+foreach($User in $UserNameList)
+   {
+Write-Host "-------USER--------" $User
+      Get-ADUserLastLogon -UserName $User
+   }
+
+$CurrentDate = Get-Date -format g
+$DateSplit = $CurrentDate -split "/"
+$xMo = $DateSplit[0]
+$xDa = $DateSplit[1]
+$DateSplit2 = $DateSplit[2] -split " "
+$xYe = $DateSplit2[0]
+$AMPM = $DateSplit2[2]
+$DateSplit3 = $DateSplit2[1] -split ":"
+
+$UserOutput = ".\UserCheckResults_"+$xYe+"-"+$xMo+"-"+$xDa+"_"+$DateSplit3[0]+$DateSplit3[1]+$AMPM+".csv"
+$Global:VersionObjFull | Export-csv -path $UserOutput
+}
+

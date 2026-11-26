@@ -1,0 +1,198 @@
+﻿# This is a sample profile script.  Not all the paths may be correct for your machine,
+# especially if you have 64-bit Windows and you have Progra~2 instead of Progra~1 below.
+
+
+$CurrentWindowsID = [System.Security.Principal.WindowsIdentity]::GetCurrent()
+$CurrentPrincipal = new-object System.Security.Principal.WindowsPrincipal($CurrentWindowsID)
+if ($CurrentPrincipal.IsInRole("Administrators")) { $UacElevated = $True } else { $UacElevated = $False }
+
+if ( $UacElevated ) 
+{
+    # Set your colors when running as an elevated user.
+    [system.console]::set_foregroundcolor("yellow") 
+    [system.console]::set_backgroundcolor("black")
+    cd c:\
+    clear-host
+    "Running as an administrative user ($env:userdomain\$env:username) on $env:computername `n"
+}
+else
+{
+    # Set your colors when running as a standard user.
+    [system.console]::set_foregroundcolor("white")
+    [system.console]::set_backgroundcolor("darkblue")
+    cd c:\
+    clear-host
+    "Running as a standard user ($env:userdomain\$env:username) on $env:computername `n"
+}
+
+$MyScriptDir = Get-ScriptDirectory
+
+
+######## MODULES ##########
+
+Import-Module ActiveDirectory
+#Import-Module $MyScriptDir"\NPPC-ActiveDirectory-Functions.psm1"
+#Import-Module $MyScriptDir"\NPPC-Database-SSRS-Functions.psm1"
+#Import-Module $MyScriptDir"\NPPC-General-Functions.psm1"
+#Import-Module $MyScriptDir"\NPPC-KeePass-Functions.psm1"
+#Import-Module $MyScriptDir"\NPPC-Log-Functions.psm1"
+#Import-Module $MyScriptDir"\NPPC-MESAPPS-Functions.psm1"
+#Import-Module $MyScriptDir"\NPPC-Services-Functions.psm1"
+#Import-Module $MyScriptDir"\RLG-Local_Users_and_Groups-Functions.psm1"
+#Import-Module $MyScriptDir"\NPPC-Tomcat-Functions.psm1"
+Import-Module NPPC-ActiveDirectory-Functions.psm1
+Import-Module NPPC-Database-SSRS-Functions.psm1
+Import-Module NPPC-General-Functions.psm1
+Import-Module NPPC-KeePass-Functions.psm1
+Import-Module NPPC-Log-Functions.psm1
+Import-Module NPPC-MESAPPS-Functions.psm1
+Import-Module NPPC-Services-Functions.psm1
+Import-Module RLG-Local_Users_and_Groups-Functions.psm1
+Import-Module NPPC-Tomcat-Functions.psm1
+
+
+######## FUNCTIONS ##########
+function hh ( $term ) { get-help $term -full | more.com }
+function ch {ghy | select -exp commandline | ogv -outp M | iex}   #GUI command history
+function ns {net statistics workstation} # workstation net traffic information
+function get-cpuspeed { get-wmiobject -query "SELECT CurrentClockSpeed FROM Win32_Processor" | fl CurrentClockSpeed }
+function sync-time { w32tm.exe /resync }
+function find-files ($pattern = "*", $searchroot = ".") { dir -r $searchroot | where {$_.fullname -like $pattern} | ft fullname }
+function ip { ipconfig.exe | select-string 'IPv4|IPv6|^[^\s].+\:$|Subnet|Gateway' | select-string -Pattern "Tunnel" -NotMatch } # current IP
+function uu ($user) {Unlock-ADAccount $user} #UU - Unlock User
+function OSVer {gwmi Win32_OperatingSystem}  #get OS version and other info
+function DNSList {Resolve-DnsName -Type ALL -Name _ldap._tcp.dc._msdcs.$env:userdnsdomain} # List all DCs
+function Clip-History {(Get-History).CommandLine | clip.exe}   #Command Line Hisotry to Clipboard
+function Drive-Info {Get-PSDrive -PSProvider FileSystem | Where-Object {$_.Used -gt 0} |
+                     Select-Object -Property Root,@{Name="SizeGB";Expression={($_.Used+$_.free)/1GB -as [int]}},
+                     @{name="UsedGB";Expression={($_.used/1GB) -as [int]}},
+                     @{name="FreeGB";Expression={($_.free/1GB) -as [int]}},
+                     @{name="PctFree";Expression={[math]::Round(($_.Free/($_.Used+$_.Free))*100,2)}}}
+function App-Info {gcim win32_product -computername $env:computername | 
+                   Sort-Object -property Vendor,Name |
+                   Select-Object -property Vendor,Name,
+                   @{Name="Installed";Expression = {($_.InstallDate.Insert(4,"-").insert(7,"-") -as [datetime]).ToShortDateString()}},
+                   InstallLocation,InstallSource,PackageName,Version}  #Installed Apps
+function List-Functions {Get-ChildItem function:\}
+#function view ($computer = 'localhost') { explorer.exe \\$computer\c$ } 
+#function tt { cd c:\temp }
+#function rr { "-" * 70 ; foreach ($x in $error[0..7]) { $x ; "-" * 70 } }
+#function nn ( $path ) { C:\PROGRA~2\Notepad++\notepad++.exe $path } 
+#function ns ($name = "script.ps1") { new-item -name $name -itemtype file ; nn $name }
+#function py { ping.exe -n 2 www.yahoo.com }
+#function remove-flashcookies { Remove-Item $env:APPDATA\Macromedia\FlashP~1\* -recurse -force }
+
+######## ALIASES ##########
+new-alias -name find -value select-string
+new-alias -name mo -value measure-object
+new-alias -name ch -value clear-host
+new-alias -name fl -value List-Functions
+
+
+# The prompt function is run automatically, it changes the appearance of your command prompt.
+# Note that it will also create a command history file with all your entered commands.
+# The history file will be located here: $env:userprofile\powershell-history.txt
+function prompt 
+{
+	if ($global:lastcommandnumber -eq $null) { $global:lastcommandnumber = 0 } 
+	get-history -count 1 | foreach `
+	{ 
+		if ($_.id -ne $global:lastcommandnumber -and $_.commandline -ne "cls")
+		{
+			$global:lastcommandnumber = $_.id
+			"[$(get-date)] " + $_.commandline | out-file -append -filepath $env:userprofile\powershell-history.txt
+		}
+	}
+	
+    $errtxt = '($?=' + "$? : LastExitCode=$LASTEXITCODE)"
+    if ($UacElevated) { $titletxt = "PowerShell-Admin" } else { $titletxt = "PowerShell-Standard" }
+    $host.UI.rawui.windowtitle = "$titletxt   $errtxt   $(get-date -uFormat '%A   %d-%b-%Y')"
+    write-host "$(get-location)>" -nonewline -fore yellow
+    return " "  #Needed to remove the extra "PS"
+}
+
+
+
+function show-problems ($count = 200, $last = 30, [switch] $SecurityLogAlso)
+{
+    $events  = Get-EventLog -LogName Application -Newest $count
+    $events += Get-EventLog -LogName System      -Newest $count
+    if ($SecurityLogAlso) { $events += Get-EventLog -LogName Security -Newest $count }
+    
+    $events | where { $_.entrytype -match 'Error|Warning|FailureAudit' } | 
+       sort-object TimeGenerated | select-object -last $last | 
+       foreach-object { write-host -fore darkred -back white $_.TimeGenerated ; $_.Message + "`n" } 
+}
+
+
+##############################################################################
+#  Script: Speak-Text
+#    Date: 27.Mar.2010
+# Version: 1.2
+#  Author: Jason Fossen (www.WindowsPowerShellTraining.com)
+# Purpose: Demos how to use a COM object to speak audible text.
+#   Legal: Script provided "AS IS" without warranties or guarantees of any
+#          kind.  USE AT YOUR OWN RISK.  Public domain, no rights reserved.
+##############################################################################
+function Speak-Text( $Text = "Please tell me what to say!" )
+{
+    $Voice = new-object -com "SAPI.SpVoice" -strict
+    $Voice.Rate = -2                # Valid Range: -10 to 10, slowest to fastest, 0 default.
+    $Voice.Speak($Text) | out-null  # Piped to null to suppress text output.
+}
+
+#if ($args.count -ne 0) { speak-text $args }
+#else { speak-text $input } 
+
+
+#############################################################################
+# Select-string will return the entire line which matches a regex pattern,
+# but this filter will extract just the matching text of the pattern.
+# Pipe strings or file objects into the filter, and don't forget that you
+# may sometimes need to pipe into out-string first.  If your regex includes
+# any parentheses to define submatches, then only the submatches are
+# extracted, not the entire regex match, unless you put the whole regex
+# inside parentheses.  Multiple submatches are OK, so are nested submatches.
+# Blank output lines are suppressed, like from submatches with alternation.
+# Author: Jason Fossen
+# Version: 1.0
+#############################################################################
+
+filter extract-text ($RegularExpression) 
+{ 
+    select-string -inputobject $_ -pattern $regularexpression -allmatches | 
+    select-object -expandproperty matches | 
+    foreach { 
+        if ($_.groups.count -le 1) { if ($_.value){ $_.value } } 
+        else 
+        {  
+            $submatches = select-object -input $_ -expandproperty groups 
+            $submatches[1..($submatches.count - 1)] | foreach { if ($_.value){ $_.value } } 
+        } 
+    }
+}
+
+# Notes:
+# Each Match object has a Groups property which is an array of one
+# or more Group objects.  The first Group object is the matching
+# text of the entire regex, while any additional Group objects
+# beyond the first represent the submatches.  
+# 
+# Examples:
+# ipconfig.exe /all | extract-text 'Description'
+# ipconfig.exe /all | extract-text 'De(script)ion'
+# ipconfig.exe /all | extract-text 'De(sc(ri)pt)ion'
+# ipconfig.exe /all | extract-text 'De(sc(ri)(pt))ion'
+# ipconfig.exe /all | extract-text 'De(sc((r)i)(pt))ion'
+# ipconfig.exe /all | extract-text '(De(sc((r)i)(pt))ion)'
+
+# Just for demos...
+# $input | extract-text $args[0]
+
+function Get-ScriptDirectory
+{
+    Split-Path $script:MyInvocation.MyCommand.Path
+}
+
+
+

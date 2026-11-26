@@ -1,0 +1,437 @@
+<#
+.SYNOPSIS
+      This script can list all of local group memberships on multiple system.   It will enumerate down to the user IDs.
+      It will go six levels deep
+         Server, Local Group, GroupLevel2, GroupLevel3, GroupLevel4, GroupsLevel5, GroupLevel6
+       
+.DESCRIPTION
+      This script can list all of local group memberships on multiple system.   It will enumerate down to the user IDs.
+      It will go six levels deep
+         Server, Local Group, GroupLevel2, GroupLevel3, GroupLevel4, GroupsLevel5, GroupLevel6
+       
+.PARAMETER	<ComputerName or cn <string[]>
+      Specifies the computers on which the command runs. The default is the local computer. 
+		
+.PARAMETER  <FilePath or fp>
+      Specifies the directory where the output files will be written.  Default is G:\MESAPPS\Tech\Security
+
+.PARAMETER <OnlyMESGroups or MESOnly>
+      Specifies if all LocalGroups should be enumerated or just MES related groups (non-standard Windows Groups)
+      The default is $true for only MES groups to be enumerated.  
+
+.PARAMETER <Verbose>   
+      The script is written to include additional information when the -Verbose flag is added to the command line.
+
+   
+.NOTES
+   Author: Ron Gines
+   Nestle Purina - Pet Products Engineering 
+   Ron.Gines@purina.nestle.com
+   Version History:
+     1.0   First Full Version                                  Date:  April  8, 2014
+     1.1   Cleaned up output and parameter usage.              Date:  May   11, 2014
+     1.2   Forked from Compare-LocalGroupMembership.PS1        Date:  June  11, 2014
+     1.3   Cleaned up Putputs, added flag for non-MES groups   Date:  June  12, 2014
+     1.4   Fixed some issues on the file output.
+           Data is accurate out to six levels now.             Date:  June  13, 2014
+
+.EXAMPLE
+      C:\PS> G:\MESAPPS\Tech\Enumerate-LocalGroupMembership.ps1
+        or
+      C:\> PowerShell G:\MESAPPS\Tech\Enumerate-LocalGroupMembership.ps1
+		
+      This example shows how to list all of local groups and their membership on the local computer.	
+      
+.EXAMPLE
+      C:\PS> G:\MESAPPS\Tech\Enumerate-LocalGroupMembership.ps1 -cn USSTLL4000,USSTLL4100 -fp C:\Temp
+		
+      This example will run the script on the two servers USSTLL4000 and USSTLL4100 and will write out two separate 
+      files to the C:\Temp directory named USSTLL4000.csv and USSTLL4100.csv
+
+.EXAMPLE
+      C:\PS> G:\MESAPPS\Tech\Enumerate-LocalGroupMembership.ps1 -cn USSTLL4000 -MESOnly $false
+		
+      This example will run the script on the server USSTLL4000 and will write enumerate all of the local groups, 
+      not just the non-standard Windows Groups.   This may take some time to run.
+      
+.EXAMPLE
+      PowerShell .\Enumerate-LocalGroupMembership.ps1 -cn USSTLL4000 -fp . 
+		
+      This is a typical example when you need to just pull the users within groups on one server and you want to 
+      output to go to the same directory that the script was called from.  This is what we typically run on our
+      Engineering servers.
+
+	
+#>
+
+#------------------------------
+#  Variables
+#------------------------------
+
+
+Param
+(
+	[Parameter(Position=0,Mandatory=$false)]
+	[ValidateNotNullorEmpty()]
+	[Alias('cn')][String[]]$ComputerName=$Env:COMPUTERNAME,
+	[Parameter(Position=1,Mandatory=$false)]
+	[Alias('fp')][String]$FilePath="G:\MESAPPS\Tech\Security",
+	[Parameter(Position=2,Mandatory=$false)]
+	[Alias('MESOnly')]$OnlyMESGroups=$true
+)
+
+$ServerNamePrefix = "USSTLH"   # Replace with Plant specific prefix such as USCLNH
+$DomainNamePrefix = "NESTLE"   # Should not need to be changed.
+$OutFile = ".\Temp.out"
+
+$GroupExcludeList = @()
+# Edit this array if you wish to add additional local groups to be excluded 
+# when the -MESOnly flag is thrown (which is default) on the command line.
+$GroupExcludeList += "Administrators"
+$GroupExcludeList += "Backup Operators"
+$GroupExcludeList += "Certificate Service DCOM Access"
+$GroupExcludeList += "Cryptographic Operators"
+$GroupExcludeList += "Distributed COM Users"
+$GroupExcludeList += "Event Log Readers"
+$GroupExcludeList += "Guests"
+$GroupExcludeList += "Netmon Users"
+$GroupExcludeList += "Network Configuration Operators"
+$GroupExcludeList += "Performance Log Users"
+$GroupExcludeList += "Performance Monitor Users"
+$GroupExcludeList += "Power Users"
+$GroupExcludeList += "Print Operators"
+$GroupExcludeList += "Remote Desktop Users"
+$GroupExcludeList += "Replicator"
+$GroupExcludeList += "Users"
+$GroupExcludeList += "WinRMRemoteWMIUsers__"
+
+$Level2 = ""
+$Level3 = ""
+$Level4 = ""
+$Level5 = ""
+$Level6 = ""
+
+#------------------------------
+#  Functions
+#------------------------------
+
+	function fn_FindDomainGroup([string]$GroupName)
+	{
+		$sGroup = $GroupName
+		$searcher=new-object DirectoryServices.DirectorySearcher([ADSI]"")
+		$filter="(&(objectCategory=group)(samAccountName=$sGroup))"
+		$searcher.filter=$filter
+		$Results = $searcher.findall()
+		
+		$GroupLdapPath = ""
+		
+		if ([int32]$Results.Count -gt [int32]0){
+	
+			$Result = $Results[0]
+			$GroupLdapPath=$result.properties['adspath']
+		}
+		Return $GroupLdapPath	
+	}
+    
+   	function fn_GetGroupMembers([string]$GroupName2, [string]$isLocalGroup2, [string]$AdsPath2)
+	{
+		$MemberNames2 = @()
+		if ($isLocalGroup2 -eq "true"){
+			$MemberNames2 =fn_GetLocalGroupMembers($GroupName2)
+		}else{
+			if ($ADSPath2.Contains("LDAP"))
+			{	
+				$MemberNames2 = fn_GetLDAPGroupMembers($ADSPath2)
+			}else
+			{
+				if (! $GroupName2.Contains($DomainName + "\")){
+					$MemberNames2 = fn_GetLocalGroupMembers($GroupName2)
+				}
+			}
+		}
+		return $MemberNames2
+
+	}
+
+	function fn_GetLocalGroupMembers([string]$GroupPath)
+	{
+		$MemberArray = @()
+		$GroupName = $GroupPath.Replace("\","/")
+		$Group= [ADSI]"WinNT://$GroupName,group"
+		$Members = @($Group.Invoke("Members"))
+		$Members | ForEach-Object {
+			$Member = $_.GetType().InvokeMember("Name", 'GetProperty', $null, $_, $null)
+            $ShortMember = $Member
+			$Type = $_.GetType().InvokeMember("Class", 'GetProperty', $null, $_, $null)
+			$Path = $_.GetType().InvokeMember("AdsPath", 'GetProperty', $null, $_, $null)
+			$arPath = $Path.Split("/")
+			$Domain = $arPath[$arPath.length - 2]	
+			$Domain = [string]$Domain.ToUpper()
+			$Member = $Domain + "\" + $Member
+            $MemberArray = @{
+                'MemberType' = $Type.ToUpper();
+                'MemberShortName' = $ShortMember;
+                'MemberLDAPName' = $Member
+                }
+            $MemberNameObj = New-Object -TypeName PSObject -Property $MemberArray
+            $MemberNameObj.psobject.typenames.insert(0,'Custom.MemberName.List.Thing')
+            $MemberOutArray += $MemberNameObj
+		    } 
+		Return $MemberOutArray
+	}
+
+	function fn_GetLDAPGroupMembers([string]$GroupLdap)
+       {
+		$MemberArray = @()
+        $MemberOutArray = @()
+		$ADGroup=[ADSI]"$GroupLdap"
+		$GroupSam = $ADGroup.samAccountName
+		
+		#Get group members		
+		$Members = @($ADGroup.psbase.Invoke("Members"))
+		$Members | ForEach-Object {
+			$Member = $_.GetType().InvokeMember("samAccountName", 'GetProperty', $null, $_, $null)
+            $ShortMember = $Member
+			$Type = $_.GetType().InvokeMember("Class", 'GetProperty', $null, $_, $null)
+			$Path = $_.GetType().InvokeMember("AdsPath", 'GetProperty', $null, $_, $null)
+			$Member = $DomainName + "\" + $Member
+            $MemberArray = @{
+                'MemberType' = $Type.ToUpper();
+                'MemberShortName' = $ShortMember;
+                'MemberLDAPName' = $Member
+                }
+            $MemberNameObj = New-Object -TypeName PSObject -Property $MemberArray
+            $MemberNameObj.psobject.typenames.insert(0,'Custom.MemberName.List.Thing')
+            $MemberOutArray += $MemberNameObj
+		    } 
+		Return $MemberOutArray
+        }
+#------------------------------
+#  Main
+#------------------------------
+
+foreach($Computer in $ComputerName)
+{
+   $TempOut = $Computer
+   Write-Host $TempOut 
+   $OutArray = @()
+   $FileOut = @()
+   $AllLocalGroups = Get-WmiObject -Class Win32_Group -NameSpace "root\cimv2" -Filter "LocalAccount='$True'" -ComputerName $Computer
+   foreach ($LocalGroupName in $AllLocalGroups.Name)
+   {
+      if (($GroupExcludeList -contains $LocalGroupName) -and ($OnlyMESGroups -eq $true))
+      {
+         $TempOut = "------" + $LocalGroupName + " ( GROUP - Excluded from Enumeration )"
+         Write-Host $TempOut 
+      }
+      else
+      {
+         $TempOut = "------" + $LocalGroupName + " ( GROUP )"
+         Write-Host $TempOut 
+         $group =[ADSI]"WinNT://$($Computer)/$LocalGroupName"
+         foreach($Member in @($group.Invoke("Members")))
+            {
+               $MemberName = $Member.GetType().InvokeMember("Name", 'GetProperty', $null, $Member, $null)
+               $TempOut = "------|------" + $MemberName
+               $Level2 = $MemberName
+               $MemberPath = $Member.GetType().InvokeMember("ADsPath", 'GetProperty', $null, $Member, $null)
+               $UserName = ""
+               #verify if group
+               if ($Member.GetType().InvokeMember("Class", 'GetProperty', $null, $Member, $null) -eq "group") 
+                  {
+                     #Local Group
+                     $TempOut = $TempOut + " ( GROUP )"
+                     Write-Host $TempOut 
+                     if($MemberPath -ilike "*/$ServerNamePrefix*")
+                        {
+                           $MemberType = "LocalGroup"
+                           $blisLocalGroup ="true"
+                        }
+                     else 
+                        {
+                            #Domain Group
+                            if($MemberPath -ilike "*/$DomainNamePrefix/*") 
+                               {
+                                  #Enumerate Group
+                                  $MemberType = "DomainGroup"
+                                  $blisLocalGroup ="false"
+                                  $ADSPath = fn_FindDomainGroup($MemberName)
+                                  $SecondMemberArray = fn_GetGroupMembers "$MemberName" $blLocalGroup "$ADSPath"						
+                                  foreach($SecondMember in $SecondMemberArray)
+                                     {
+                                        $TempOut = "------|------|------" + $SecondMember.MemberShortName
+                                        $Level3 = $SecondMember.MemberShortName
+                                        if($SecondMember.MemberType -eq "GROUP"){$TempOut = $TempOut + " ( GROUP )"}
+                                        Write-Host $TempOut 
+                                        $OutArray = @{
+                                                    'ComputerName' = $Computer;
+                                                    'LocalGroupName' = $LocalGroupName;
+                                                    'UserName' = $SecondMember.MemberShortname;
+                                                    'Level2' = $Level2;
+                                                    'Level3' = $Level3;
+                                                    'Level4' = $Level4;
+                                                    'Level5' = $Level5;
+                                                    'Level6' = $Level6;
+                                                    'MemberType' = $SecondMember.MemberType
+                                                    }
+                                        $MemberObj = New-Object -TypeName PSObject -Property $OutArray
+                                        $MemberObj.psobject.typenames.insert(0,'Custom.Member.List.Thing')
+                                        $FileOut += $MemberObj
+                                        #If User Send Output
+                                        if($SecondMember.MemberType -eq "USER")
+                                              {
+                                              }
+                                        else
+                                              #If Not user (group), then we will loop a third time.
+                                              {
+                                                  $ADSPath3 = fn_FindDomainGroup($SecondMember.MemberShortName)
+                                                  $TertiaryMemberArray = fn_GetGroupMembers "$SecondMember.MemberShortName" $blLocalGroup "$ADSPath3"						
+                                                  foreach($TertiaryMember in $TertiaryMemberArray)
+                                                     {
+                                                        $TempOut = "------|------|------|------" + $TertiaryMember.MemberShortName
+                                                        $Level4 = $TertiaryMember.MemberShortName
+                                                        if($TertiaryMember.MemberType -eq "GROUP"){$TempOut = $TempOut + " ( GROUP )"}
+                                                        Write-Host $TempOut 
+                                                        $OutArray = @{
+                                                                    'ComputerName' = $Computer;
+                                                                    'LocalGroupName' = $LocalGroupName;
+                                                                    'UserName' = $TertiaryMember.MemberShortname;
+                                                                    'Level2' = $Level2;
+                                                                    'Level3' = $Level3;
+                                                                    'Level4' = $Level4;
+                                                                    'Level5' = $Level5;
+                                                                    'Level6' = $Level6;
+                                                                    'MemberType' = $TertiaryMember.MemberType
+                                                                    }
+                                                        $MemberObj = New-Object -TypeName PSObject -Property $OutArray
+                                                        $MemberObj.psobject.typenames.insert(0,'Custom.Member.List.Thing')
+                                                        $FileOut += $MemberObj
+                                                        if($TertiaryMember.MemberType -eq "USER")
+                                                           {
+                                                           }
+                                                        else
+                                                           {
+                                                               $ADSPath4 = fn_FindDomainGroup($TertiaryMember.MemberShortName)
+                                                               $QuaternaryMemberArray = fn_GetGroupMembers "$TertiaryMember.MemberShortName" $blLocalGroup "$ADSPath4"						
+                                                               foreach($QuaternaryMember in $QuaternaryMemberArray)
+                                                                  {
+                                                                     $TempOut = "------|------|------|------|------" + $QuaternaryMember.MemberShortName
+                                                                     $Level5 = $QuaternaryMember.MemberShortName
+                                                                     if($QuaternaryMember.MemberType -eq "GROUP"){$TempOut = $TempOut + " ( GROUP )"}
+                                                                     Write-Host $TempOut 
+                                                                     $OutArray = @{
+                                                                                 'ComputerName' = $Computer;
+                                                                                 'LocalGroupName' = $LocalGroupName;
+                                                                                 'UserName' = $QuaternaryMember.MemberShortname;
+                                                                                 'Level2' = $Level2;
+                                                                                 'Level3' = $Level3;
+                                                                                 'Level4' = $Level4;
+                                                                                 'Level5' = $Level5;
+                                                                                 'Level6' = $Level6;
+                                                                                 'MemberType' = $QuaternaryMember.MemberType
+                                                                                 }
+                                                                     $MemberObj = New-Object -TypeName PSObject -Property $OutArray
+                                                                     $MemberObj.psobject.typenames.insert(0,'Custom.Member.List.Thing')
+                                                                     $FileOut += $MemberObj
+                                                                     if($QuaternaryMember.MemberType -eq "USER")
+                                                                        {
+                                                                        }
+                                                                     else
+                                                                        {
+                                                                           $ADSPath5 = fn_FindDomainGroup($QuaternaryMember.MemberShortName)
+                                                                           $QuinaryMemberArray = fn_GetGroupMembers "$QuaternaryMember.MemberShortName" $blLocalGroup "$ADSPath5"						
+                                                                           foreach($QuinaryMember in $QuinaryMemberArray)
+                                                                              {
+                                                                                 $TempOut = "------|------|------|------|------|------" + $QuinaryMember.MemberShortName
+                                                                                 $Level6 = $QuinaryMember.MemberShortName
+                                                                                 if($QuinaryMember.MemberType -eq "GROUP"){$TempOut = $TempOut + " ( GROUP )"}
+                                                                                 Write-Host $TempOut 
+                                                                                 $OutArray = @{
+                                                                                             'ComputerName' = $Computer;
+                                                                                             'LocalGroupName' = $LocalGroupName;
+                                                                                             'UserName' = $QuinaryMember.MemberShortname;
+                                                                                             'Level2' = $Level2;
+                                                                                             'Level3' = $Level3;
+                                                                                             'Level4' = $Level4;
+                                                                                             'Level5' = $Level5;
+                                                                                             'Level6' = $Level6;
+                                                                                             'MemberType' = $QuinaryMember.MemberType
+                                                                                             }
+                                                                                 $MemberObj = New-Object -TypeName PSObject -Property $OutArray
+                                                                                 $MemberObj.psobject.typenames.insert(0,'Custom.Member.List.Thing')
+                                                                                 $FileOut += $MemberObj
+                                                                                 if($QuinaryyMember.MemberType -eq "USER")
+                                                                                    {
+                                                                                    }
+                                                                                 else
+                                                                                    {
+                                                                                    }
+                                                                                 $Level6 = ""
+                                                                             }
+                                                                        
+                                                                        }
+                                                                    $Level5 = ""
+                                                                 }
+                                                           }
+                                                       $Level4 = ""
+                                                    }
+                                              }
+                                         $Level3 = ""
+                                      }
+                               }
+                             #Unknown Group - quinary
+                             else
+                               {
+                                  $MemberType = "UnknownGroup"
+                                  $blisLocalGroup ="true"
+                               } 
+                        }
+                  }
+               #if not group then user
+               else 
+                  {
+                     Write-Host $TempOut 
+                     if($MemberPath -ilike "*/$ServerNamePrefix*")
+                        {
+                           $MemberType = "USER"
+                        }
+                     else
+                        {
+                            #Domain User
+                            if($MemberPath -ilike "*/$DomainNamePrefix/*") 
+                               {
+                                  $MemberType = "USER"
+                                  $UserName = $MemberName
+                               }
+                             #Unknown User
+                             else
+                               {
+                                  $MemberType = "UnknownUser"
+                                  $UserName = $MemberName
+                               } 
+                        }
+                  }
+               $TempOut = $Computer + "," + $LocalGroupName + "," + $MemberName + "," + $MemberType
+               Write-Verbose $TempOut
+               $OutArray = @{
+                           'ComputerName' = $Computer;
+                           'LocalGroupName' = $LocalGroupName;
+                           'UserName' = $UserName;
+                           'Level2' = $Level2;
+                           'Level3' = $Level3;
+                           'Level4' = $Level4;
+                           'Level5' = $Level5;
+                           'Level6' = $Level6;
+                           'MemberType' = $MemberType
+                           }
+               $MemberObj = New-Object -TypeName PSObject -Property $OutArray
+               $MemberObj.psobject.typenames.insert(0,'Custom.Member.List.Thing')
+               $FileOut += $MemberObj
+               $Level2 = ""
+            }
+      }
+   }
+   $OutFileName = $FilePath + "\" + $Computer + "_LocalGroupMemberships.csv"
+   $FileOut = $FileOut | select-object -property ComputerName,MemberType,UserName,LocalGroupName,Level2,Level3,Level4,Level5,Level6 | export-csv $OutFileName -noType
+}
+Write-Host "We are done."

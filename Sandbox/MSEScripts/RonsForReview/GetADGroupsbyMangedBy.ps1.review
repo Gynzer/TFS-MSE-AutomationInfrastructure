@@ -1,0 +1,22 @@
+# Get list of groups owned by a certain account
+# Written by Chris Stotler.
+
+#$GroupOwner   = "PUMILLENLO"
+$GroupOwner   = "PUELKINGJE"
+$OutputReport = "c:\Temp\Groups.csv"
+
+"Group `t GroupCategory `t Location `t ManagedBy" | Out-File $OutputReport
+
+Get-ADGroup -LDAPFilter "(ManagedBy=$((Get-ADuser -Identity $($GroupOwner)).distinguishedname))" -SearchBase "OU=NPPC AMS,OU=AMS, OU=Organizations,DC=NESTLE,DC=com" -Properties ManagedBy |
+
+Select-Object Name, GroupCategory, DistinguishedName, ManagedBy |
+foreach-object { 
+                    $Name = $_.Name
+                    $GC = $_.GroupCategory
+                    $DN = $_.DistinguishedName 
+                    $DN = $DN.Substring($DN.IndexOf(',')+1)                   
+                    $DN = $DN.Replace(",OU=NPPC AMS,OU=AMS,OU=Organizations,DC=nestle,DC=com","")                  
+                    $MB = $_.ManagedBy
+                    $MB = $MB.Substring(0, $MB.IndexOf(','))
+
+"$($Name) `t $($GC) `t $($DN) `t $($MB)" | Out-File $OutputReport -Append }

@@ -1,0 +1,169 @@
+#------------------------------------------------------------------------
+# CreateLocalGroup.ps1
+# NPPC FAS Project User Creation Script (Step 1)
+# Author: Ron Gines
+# Version History
+#      3.0  -  Complete Rewrite using PoweShell instead of VBScript
+#              Date:    August 8, 2013
+#
+#      2.0  -  Complete Rewrite 
+#              Date:    January 19, 2007
+#
+#   This script will create local groups on the local system.  The next 
+#   step will populate the local groups with Global Groups from the 
+#   Active Directory OU.
+#
+#   For MES Cluster installations:
+#   Must be run once on each side of the cluster node. 
+#
+#   The user running this command must have access to both the local 
+#   server as an admin and be able to query the AD tree with permission to 
+#   read and write into the plants portion of the LMS branch.
+#
+#   This script is self-contained with the exception of the input
+#   file.   There are no other include files or requirements.
+#
+# Configuration:
+#
+#   Edit the section with the header of 'PLANTS EDIT HERE'
+#
+#
+# Input:  
+#
+#   Local Group CSV file structure:
+#      Local Server Group Name
+#      Local Group Description 
+#
+#----------------------------------------------------------------------
+
+[CmdletBinding()]
+param(
+   [String]$Help,
+   [String]$FilePath = ".\MSE_CreateLocalGroups.csv",
+   [String]$Computer = $env:COMPUTERNAME
+)
+
+#==============================================================================
+# DEFINE Variables and Objects
+#==============================================================================
+#
+#==============================================================================
+#                     PLANTS EDIT  HERE
+#==============================================================================
+#Variables Requiring Editing At Each Plant Implementation - EDIT HERE -
+#==============================================================================
+#
+# - This script has nothing for the Plants to Edit.   All information in CSV.
+#
+#==============================================================================
+#==================================================================
+#               DO NOT EDIT BELOW THIS LINE
+#==================================================================
+#==============================================================================
+
+
+#==============================================================================
+# FUNCTIONS
+#==============================================================================
+
+#==============================================================================
+function funHelp()
+{
+$helpText=@"
+DESCRIPTION:
+NAME: CreateLocalGroup.ps1
+Creates a local group on either a local or remote machine.
+
+PARAMETERS:
+-Computer  Specifies the name of the computer upon which to run the script
+-Help      Prints help file
+-FilePath  Specifies the path to the config file to be used
+             (defaults to - ".\MSE_CreateLocalGroups.csv")
+
+SYNTAX:
+CreateLocalGroup.ps1 -FilePath <file location> -Computer <computer to create groups on> -Help <DisplaysHelp>
+Generates an error.  Displays Help File.
+
+EXAMPLES:
+CreateLocalGroup.ps1 -Computer TestbedServer
+Creates local groups from the default CSV file on the machine TestbedServer 
+
+CreateaLocalGroup.ps1 -FilePath .\CreateLocalGroup.csv
+Creates Local Groups based on the information in "CreateLocalGroup.csv"
+
+CreateLocalGroup.ps1 -help ?
+Displays the help topic for the script
+
+"@
+$helpText
+exit
+}
+
+
+#==============================================================================
+function MSECreateLocalGroup()
+{
+Write-Verbose "Created the group $Group on computer $Computer with description $Desc."
+try {
+    $objOu = [ADSI]"WinNT://$Computer"
+    $objUser = $objOU.Create("Group", $Group)
+    $objUser.SetInfo()
+    $objUser.description = $Desc
+    $objUser.SetInfo()
+    Write-Verbose "Created the group $Group on computer $Computer with description $Desc."
+    Write-EventLog -Logname Application -Source "MSE-Scripts" -EntryType Information -EventID 1 -Message  "CreateLocalGroups: Created the group $Group on computer $Computer with description $Desc."
+    } catch {
+    Write-EventLog -Logname Application -Source "MSE-Scripts" -EntryType Error -EventID 99 -Message  "CreateLocalGroups: Error Creating the group $Group on computer $Computer with description $Desc."
+    }
+}
+
+#==============================================================================
+#  MAIN CODE
+#==============================================================================
+
+if ([System.Diagnostics.EventLog]::SourceExists("MSE-Scripts"))
+{
+    Write-Verbose  "Source 'MSE-Scripts' exists."
+}
+else
+{
+    New-EventLog -LogName Application -Source "MSE-Scripts"
+    Write-Verbose  "Source 'MSE-Scripts' Created."
+}
+
+
+
+
+Write-EventLog -Logname Application -Source "MSE-Scripts" -EntryType Information -EventID 1 -Message "CreateLocalGroups: Script CreateLocalGroups is starting."
+
+Write-Verbose  "Computer:      $Computer"
+Write-Verbose  "Group:         $Group"
+Write-Verbose  "Help:          $Help"
+Write-Verbose  "FilePath:      $FilePath"
+Write-Verbose  "Description:   $Desc"
+
+if($Help){ "Obtaining help ..." ; funhelp }
+
+if(Test-path $FilePath)
+{
+    Write-EventLog -Logname Application -Source "MSE-Scripts" -EntryType Information -EventID 1 -Message "CreateLocalGroups: File $FilePath exists."
+    Write-Verbose  "File $FilePath exists."
+    $GroupList = import-csv $FilePath 
+    foreach ($GroupLine in $GroupList)
+    {
+        $Group = $GroupLine.LocalGroupname
+        $Desc  = $GroupLine.LocalGroupDescription
+        MSECreateLocalGroup
+    }
+    Write-Host  "Groups Created"
+}
+else
+{
+    Write-EventLog -Logname Application -Source "MSE-Scripts" -EntryType Error -EventID 99 -Message "CreateLocalGroups: File $FilePath does not exist."
+    Write-Verbose  "File $FilePath does not exist."
+    Write-Host  "File " $FilePath " does not exist."
+    exit
+}
+
+
+ 

@@ -1,0 +1,7 @@
+﻿# ListSQLDatabases.ps1
+# Must be run with an ADM2 account capabile of accessing remote SQL Server instance.
+$DBServer = Read-Host -Prompt "Enter the database instance to query for databases (<server>\<instance>)"
+[System.Reflection.Assembly]::LoadWithPartialName('Microsoft.SqlServer.SMO') | out-null
+$s = New-Object ('Microsoft.SqlServer.Management.Smo.Server') $DBServer
+$dbs=$s.Databases
+$dbs | Get-Member -MemberType Property

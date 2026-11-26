@@ -1,0 +1,10 @@
+# Set Group ManagedBy a User to Another User.
+# Writen by Chris Stotler
+$OriginalOwner = "PUMILLENLO"
+$NewOwner      = "PUELKINGJE"
+
+#$Groups = Get-ADGroup -LDAPFilter "(ManagedBy=$((Get-ADuser -Identity $($OriginalOwner)).distinguishedname))" -SearchBase "OU=US-StLouis-HQ,OU=LMS Users and Groups,OU=NPPC AMS,OU=AMS,OU=Organizations,DC=NESTLE,DC=com" -Properties ManagedBy
+$Groups = Get-ADGroup -LDAPFilter "(ManagedBy=$((Get-ADuser -Identity $($OriginalOwner)).distinguishedname))" -SearchBase "OU=US-StLouis-HQ,OU=LMS Users and Groups,OU=NPPC AMS,OU=AMS,OU=Organizations,DC=NESTLE,DC=com" -Properties ManagedBy
+ForEach($g in $Groups) { Get-ADGroup -Identity $g.DistinguishedName | Set-ADGroup -ManagedBy (Get-ADUser -Identity $($NewOwner)).distinguishedname }
+
+

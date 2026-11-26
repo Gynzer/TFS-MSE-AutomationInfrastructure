@@ -1,0 +1,148 @@
+﻿#***********************************************************************************************************************
+# D O C U M E N T A T I O N
+#***********************************************************************************************************************
+# Title			: Chg-GroupOwners
+# Description	: Set ownership of AD groups
+# Parameter(s)	: N/A
+# Version		: 1.0
+#
+#***********************************************************************************************************************
+# References:
+# http://stackoverflow.com/questions/2988880/extricate-substring-using-powershell
+#***********************************************************************************************************************
+#=======================================================================================================================# Definitions#=======================================================================================================================$ScriptName = "Chg-GroupOwners"$ScriptPath = (Split-Path -Path $MyInvocation.MyCommand.Path -Parent) + "\" ;$InpFile = "$ScriptPath" + "InputFiles" + "\" + "Chg-GroupOwners.$($env:username).inp.csv"$icount = 0#=======================================================================================================================
+# FUNCTIONS
+#=======================================================================================================================
+#-----------------------------------------------------------------------------------------------------------------------
+Function Chk-InputFile {
+#-----------------------------------------------------------------------------------------------------------------------
+    param($InpFile)
+
+    $answer = Read-Host "Is the input file name '$($InpFile)' correct? (Y/N)"
+    if ($answer -notin ("y","Y","Yes","YES","YeS","YEs","yes","yEs","yeS","yES","n","N","No","NO","no","nO")){
+        Write-Host "Answer should be one of these: 'Y','N','Yes','No','yes','no','y','n'... exiting!"
+        $InpFile = "EXIT"
+        Exit
+    } else{
+        if ($answer -in ("n","No","NO","no","nO")) {    
+            $InpFile = Read-Host "Provide the correct name "
+            if (Test-Path $InpFile) {
+            Write-host "InpFile : $InpFile"
+            } else {
+                Write-Host "File does not exist!...exiting..." 
+                $InpFile = "EXIT"
+                Exit
+            }
+        }
+    }
+    Return $InpFile
+}
+#-----------------------------------------------------------------------------------------------------------------------
+Function GetYearMonth() {
+#-----------------------------------------------------------------------------------------------------------------------
+	[string]$TimeStamp = ([string](get-date).Year) + ".";
+	if ((get-date).Month -lt 10) { [string]$TimeStamp = [string]$TimeStamp + "0" + [string](get-date).Month + "."; }
+	else { [string]$TimeStamp = [string]$TimeStamp + [string](get-date).Month + "."; }
+	if ((get-date).Day -lt 10) { [string]$TimeStamp = [string]$TimeStamp + "0" + [string](get-date).Day; }
+	else { [string]$TimeStamp = [string]$TimeStamp + [string](get-date).Day; }	
+	[string]$TimeStamp = [string]$TimeStamp + "-";
+	if ((get-date).Hour -lt 10) { [string]$TimeStamp = [string]$TimeStamp + "0" + [string](get-date).Hour + "."; }
+	else { [string]$TimeStamp = [string]$TimeStamp + [string](get-date).Hour + "."; }	
+	if ((get-date).Minute -lt 10) { [string]$TimeStamp = [string]$TimeStamp + "0" + [string](get-date).Minute + "."; }
+	else { [string]$TimeStamp = [string]$TimeStamp + [string](get-date).Minute + "."; }	
+	if ((get-date).Second -lt 10) { [string]$TimeStamp = [string]$TimeStamp + "0" + [string](get-date).Second; }
+	else { [string]$TimeStamp = [string]$TimeStamp + [string](get-date).Second; }
+	return $TimeStamp;
+}
+#-----------------------------------------------------------------------------------------------------------------------
+Function Write-Headers {
+#-----------------------------------------------------------------------------------------------------------------------
+    $output = `
+        "Group" + "`t" + `        "Type"  + "`t" + `        "Owner" + "`t" + `        "Notes Before" + "`t" + `        "Notes After" + "`t" + `
+        "Action" 
+
+    Out-File -FilePath $OutFile -InputObject $output -Append
+    Return;
+}#-----------------------------------------------------------------------------------------------------------------------Function Get-DayMonthYear {    #--- Date ---
+    if ((get-date).Day -lt 10) {
+        [string]$day = "0" + [string](get-date).Day
+    } else {
+        [string]$day = [string](get-date).Day 
+    }
+    if ((get-date).Month -lt 10) {
+        [string]$month = "0" + [string](get-date).Month
+    } else {
+        [string]$month = [string](get-date).Month 
+    }
+    [string]$year = [int]((get-date).Year + 1)
+
+    $chgdate = "$day.$month.$year"    Return $chgdate }#-----------------------------------------------------------------------------------------------------------------------Function Get-InfoField {#-----------------------------------------------------------------------------------------------------------------------
+    Param (        $grouptype,        $managedby,        $operator,        $chgdate    )
+    #--- compose Notes ---
+    $Info = "<GroupInfo>" + "`r`n" + `
+            "  " + "<Type>$grouptype</Type>" + "`r`n" + `
+            "  " + "<Owner>$managedby</Owner>" + "`r`n" + `
+            "  " + "<Operator>$operator</Operator>" + "`r`n" + `
+            "  " + "<ReviewDate>$chgdate</ReviewDate>" + "`r`n" + `
+            "</GroupInfo>"
+    Return $Info ;
+}#-----------------------------------------------------------------------------------------------------------------------Function Upd-OldInfo {#-----------------------------------------------------------------------------------------------------------------------    Param (
+        $OldInfo,
+        $NewOwner,
+        $NewOperator,
+        $NewReviewDate
+    )    if ($OldInfo -match "<Owner>(?<content>.*)</Owner>") {
+        $OldOwner = $matches['content']
+        if (($OldOwner -eq "") -or ($OldOwner -eq $null)) {
+            $OldOwner = "<Owner></Owner>"
+            $NewOwner = "<Owner>$NewOwner</Owner>"
+        }
+        $OldInfo = $OldInfo.Replace($OldOwner,$NewOwner)
+    }
+
+    if ($OldInfo -match "<Operator>(?<content>.*)</Operator>") {
+        $OldOperator = $matches['content']
+        if (($OldOperator -eq "") -or ($OldOperator -eq $null)) {
+            $OldOperator = "<Operator></Operator>"
+            $NewOperator = "<Operator>$NewOperator</Operator>"
+        }
+        $OldInfo = $OldInfo.Replace($OldOperator,$NewOperator)
+    }
+
+    if ($OldInfo -match "<ReviewDate>(?<content>.*)</ReviewDate>" ) {
+        $OldReviewDate = $matches['content']
+        if (($OldReviewDate -eq "") -or ($OldReviewDate -eq $null)) {
+            $OldReviewDate = "<ReviewDate></ReviewDate>"
+            $NewReviewDate = "<ReviewDate>$NewReviewDate</ReviewDate>"
+        }
+        $OldInfo = $OldInfo.Replace($OldReviewDate,$NewReviewDate)
+    }
+    Return $OldInfo}#-----------------------------------------------------------------------------------------------------------------------Function Upd-InfoField {#-----------------------------------------------------------------------------------------------------------------------
+    Param (
+        $Info,
+        $OldInfo,
+        $NewOwner,
+        $NewOperator,
+        $NewReviewDate
+    )
+
+    if (($OldInfo.contains("<GroupInfo>") -and ($OldInfo.contains("</GroupInfo>")))) {
+        $Info = Upd-OldInfo $OldInfo $NewOwner $NewOperator $NewReviewDate
+        $action = "updated" 
+    } else {
+        $action = "added" 
+        $Info = $Info + "`r`n" + $OldInfo
+    }
+    
+    Return $Info,$action
+}#-----------------------------------------------------------------------------------------------------------------------Function Flat-Field {#-----------------------------------------------------------------------------------------------------------------------
+    Param (        $inforep    )    if (!($inforep -eq $null)) {        $inforep = [regex]::escape($inforep)        $inforep = $inforep.Replace("\r\n\","")        $inforep = $inforep.Replace("\","")        $inforep = $inforep.Replace(">rn",">")        $inforep = $inforep.Replace("><","> <")    }    Return $inforep}#-----------------------------------------------------------------------------------------------------------------------Function Remove-ManagedMembers {#-----------------------------------------------------------------------------------------------------------------------
+    Param (        $group,        $mangedbyold    )    $groupDn = Get-ADGroup -Identity "$group" -Properties DistinguishedName |select DistinguishedName     #$comando = 'dsacls "$($groupDn.DistinguishedName)" /R "nestle\$($mangedbyold)"'    Write-Host $groupDn.DistinguishedName $mangedbyold    #invoke-expression $comando    Return; }#-----------------------------------------------------------------------------------------------------------------------Function Set-ManagedMembers {#-----------------------------------------------------------------------------------------------------------------------
+    Param (        $group,        $mangedby    )    $groupDn = Get-ADGroup -Identity "$group" -Properties DistinguishedName |select DistinguishedName    $comando = 'dsacls "$($groupDn.DistinguishedName)" /G "nestle\$($managedby):WP;member"'    Write-Host $groupDn.DistinguishedName $mangedby    Try {        invoke-expression $comando    } catch {        $output =  "$group" + "`t" + `                    "Set-ManagedMembers_FunctionError" + "`t" + `                    $Error                   $Error.Clear()        Out-File -FilePath $OutLog -InputObject $output -Append        }    Return; }#-----------------------------------------------------------------------------------------------------------------------#=======================================================================================================================# Main#=======================================================================================================================#----------------------------------------------------------------------------------
+# Verify the Input File
+#----------------------------------------------------------------------------------
+$InpFile = Chk-InputFile $InpFile
+if ($InpFile -eq "EXIT") {Exit}#----------------------------------------------------------------------------------$OutFile = "$($ScriptPath)3_Chg-GroupOwners_ModifyNotes_REPORTS\$ScriptName.out.$($env:USERNAME).$(GetYearMonth).csv"$OutLog =  "$($ScriptPath)3_Chg-GroupOwners_ModifyNotes_REPORTS\$ScriptName.ErrorLog.$($env:USERNAME).$(GetYearMonth).csv"#Original Path - Pablo#$OutFile = "$($ScriptPath)GrpChgLogs\$ScriptName.out.$($env:USERNAME).$(GetYearMonth).csv"#$OutLog =  "$($ScriptPath)GrpChgLogs\$ScriptName.ErrorLog.$($env:USERNAME).$(GetYearMonth).csv"Write-Headers$iTotalRec = ((gc $InpFile).Count - 1)Write-Host "Total of records: $iTotalRec";If ($iTotalRec -le 0) {    $output = "No records to be processed. Exiting..."    Write-Host $output    Out-File -FilePath $OutLog -InputObject $output -Append    Exit;}#----------------------------------------------------------------------------------Foreach ($item in (gc $InpFile)) {    $icount++    if ($icount -gt 1) {        Write-Host "Processing $($icount-1) of $iTotalRec ..." -ForegroundColor Yellow -BackgroundColor red        $elem = @($item -split ",")        $group=$elem[0]        $grouptype=$elem[1]        $managedby=$elem[2]        $chgdate = Get-DayMonthYear        $Info=Get-InfoField $grouptype $managedby $($env:username) $chgdate        #--- update notes and MangedBy            #--- Validate if group exist            $exist = "Yes"            Write-Host "Checking if group $group exist..."            Try {                Get-ADGroup $group #just to verify the group exist                if ((get-adobject -Filter 'sAMAccountName -eq $group' -Properties ObjectClass | %{$_.ObjectClass}) -ne $null) {                    Write-Host "Checking if managedby $managedby exist..."                    if ((get-adobject -Filter 'sAMAccountName -eq $managedby' -Properties ObjectClass | %{$_.ObjectClass}) -eq $null) {                        try {                            Get-ADObject $managedby                        }catch {                            $output =  "$group" + "`t" + "ManagedBy_FunctionError" + "`t" + $Error                            $Error.Clear()                            Out-File -FilePath $OutLog -InputObject $output -Append                            $exist = "No"                        }                    }                }            } catch {                if ($Error -eq $null) {$Error = "Group does not exist"}                $output =  "$group" + "`t" + "GetGroupClass_FunctionError" + "`t" + $Error                 $Error.Clear()                Out-File -FilePath $OutLog -InputObject $output -Append                $exist = "No"            }             #--- Get Information and set Notes and Managed By             $action = ""            $infoBefore = ""            $infoAfter  = ""            if ($exist -eq "Yes") {                $update = "Yes"                $operation = ""                try {                                    $GroupName = Get-ADGroup $group -Properties samAccountName,info,managedby,GroupCategory `                                |select samAccountName,info,managedby,GroupCategory                    $OwnerDn = Get-ADUser -Identity $managedby -Properties DistinguishedName | Select DistinguishedName                    if (!(($GroupName.info -eq "") -or ($GroupName.info -eq $null))) {                        $OldInfo = $GroupName.info                        $Info = Upd-InfoField $Info $OldInfo $managedby $($env:username) $chgdate                        #$action = $Info[1]                        $operation = "updated"                        $Info = "$($Info[0])"                        #$infoBefore = Flat-Field $OldInfo                        #$infoAfter  = Flat-Field $Info                    } else {                        $operation = "added"                        #$infoBefore = ""                        #$infoAfter  = Flat-Field $Info                    }                    Set-ADGroup -Identity $GroupName.samAccountName -Replace @{info=$Info;managedby=$OwnerDn.DistinguishedName}                    Write-Host "Writing $($GroupName.samAccountName) to output file..."                    $inforep =""                    $inforep =                               "<GroupInfo>" + " " + `                              "<Type>$grouptype</Type>" + " " + `                              "<Owner>$managedby</Owner>" + " " + `
+                              "<Operator>$($env:username)</Operator>" + " " + `
+                              "<ReviewDate>$chgdate</ReviewDate>" + " " + `
+                              "</GroupInfo>"                    if (!($inforep -eq $null)) {                        $inforep = [regex]::escape($inforep)                        $inforep = $inforep.Replace("\r\n\","")                        $inforep = $inforep.Replace("\","")                        $inforep = $inforep.Replace(">rn",">")                        $inforep = $inforep.Replace("><","> <")                    }                    $output = $GroupName.samAccountName + "`t" + $grouptype + "`t" +  $managedby + "`t" + "`t" + $inforep + "`t" + $operation                    Out-File -FilePath $OutFile -InputObject $output -Append                                        } catch {                    $output =  "$group" +  "`t" + "GetADGroup_FunctionError" +  "`t" + $Error                    $Error.Clear()                    Out-File -FilePath $OutLog -InputObject $output -Append                    $update = "No"                }                #--- update rule that manager can modify memberships (Remove)                if ($update -eq "Yes") {                    if ($GroupName.managedby -ne "") {                        Try {                            $managedbyold = Get-ADUser -Identity $GroupName.managedby -Properties samAccountName | Select samAccountName                            Remove-ManagedMembers $group $managedbyold.samAccountName                        } catch {                            $output =  "$group" +  "`t" + "RemoveManagedBy_FunctionError" +  "`t" + $Error                             $Error.Clear()                            Out-File -FilePath $OutLog -InputObject $output -Append                        }                    }                    #--- update rule that manager can modify memberships "ONLY" for Distribution groups                    if ($GroupName.GroupCategory -eq "Distribution") {                        Set-ManagedMembers $group $managedby                    }                                }            }    }}

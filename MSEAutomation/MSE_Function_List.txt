@@ -1,0 +1,14 @@
+
+# Logging
+Add-MSEEventLogSource                                     Adds a custom event log source name to windows event logs
+Open-MSELogFiles              WAS: Log-MSEStart           Starts a new local Log File
+Write-MSELogFile              WAS: Log-NPEWrite           Writes an entry to the local log file
+Get-MSEUniqueTimeStamp        WAS: Get-NPEUniqueTimeStamp Creates a new timestamp that can be used in files
+Write-MSEErrorToLogFile       WAS: LogNPEError            Creates an Error Entry in the local log file
+End-MSEScript                 WAS: Log-NPEFinish          Calls Close-MSELogFile and optionally exits from the script.
+Close-MSELogFile              WAS: Log-NPEExit            Closes the log file with an ending entry
+
+
+
+
+

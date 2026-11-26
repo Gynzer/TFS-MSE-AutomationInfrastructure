@@ -1,0 +1,29 @@
+Import-Module ActiveDirectory
+
+function Get-ADUserLastLogon([string]$userName)
+{
+  $dcs = Get-ADDomainController -Filter {Name -like "USSTL*"}
+  $time = 0
+  foreach($dc in $dcs)
+  { 
+    #    $hostname = "USSTLB0005.nestle.com"
+    $hostname = $dc.HostName
+    #    $user = Get-ADUser $userName | Get-ADObject -Properties lastLogon 
+    $userlogon = Get-ADUser -Identity $userName -properties lastlogon -Server $hostname
+    $TempTime = $userlogon.LastLogon
+    $TempOut = "According to $hostname, $userName logged on last on $TempTime"
+#    Write-Host $TempOut
+    if($userlogon.LastLogon -gt $time) 
+    {
+      $time = $userlogon.LastLogon
+    }
+  }
+  $dt = [DateTime]::FromFileTime($time)
+  $userpw = Get-ADUser -Identity $userName -properties passwordlastset
+#  $dp = [DateTime]::FromFileTime($userpw.passwordlastset)
+
+
+  Write-Host $username "last logged on at:" $dt "Password last set on :" $userpw.passwordlastset
+}
+
+Get-ADUserLastLogon -UserName USSTLGINRON

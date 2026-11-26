@@ -1,0 +1,854 @@
+<#
+.SYNOPSIS
+  MSE Script has four functions 1) to test a password against an AD account.
+  2) to check the detailed information for an AD account.
+  3) To change the password of an AD account and 
+  4) The change the AD and KeePass passwords for an account.
+
+.DESCRIPTION
+  This script will ask for a USERID, OLD-Password, NEW-Password and domain.    
+  It will then check the accuracy of the passwords or attempt to change the 
+  password depending on which options are selected.
+
+  The options that you are given once the script is envoked are:
+
+	"1) Check if you know the proper password for a given User ID."
+	"2) Find the Active Directory home for a given User ID."
+	"3) Change a password for a given User ID."
+    "4) Change a password for a given User ID.  Also change password in KeePass Service File."	
+    "0) Exit"
+
+  In order to perform some of the functions of this script, you must be
+  logged into an OASIS4 system with an ADM2 account that has write access
+  to your plants AD OU.
+
+.NOTES
+  Author:  Ron Gines
+  Version History:
+        1.0 - Initial version
+		Date: December 12, 2013
+
+        1.1 - Made a few minor revisions and added some documentation
+        Date: June 2, 2014
+
+        1.2 - Made script work with NPPC PowerShell Infrastrucure
+            - Added Option number 4 that changes in AD as well as Service ID KeePass File.
+            - Changed Name of Script from AD-Change-Password.ps1 to AD-IDTools.ps1
+        Date: January 13, 2016
+
+.EXAMPLE
+	.\AD-IDTools.ps1
+
+	In this example, you will be prompted for a User Name, old password, 
+	new password and domain.  The old password will be checked against 
+	the ID.  If successful, then the password will be changed, and then 
+	the new password will be checked to make sure that the change has been 
+	made appropriately.
+
+.EXAMPLE
+	AD-IDTools.ps1 -UserID PUGINESRO -OldPW OldPa$$w0rd -NewPW NewPa$$w0rd -domain NESTLE
+
+	In this example, since we have supplied all of the possible parameters
+	you will not be prompted for anything other than what action you 
+	would like to take.
+
+
+
+===========================================================================
+#>
+
+[CmdletBinding()]
+param(
+  [string]$UserID	,
+  [string]$OldPW	,
+  [string]$NewPW	,
+  [string]$Domain    = "NESTLE"
+)
+
+########################################################
+# Loading NPE Modules
+########################################################
+# Loading NPPC Log Functions for this Script
+# NOTE: This module is required by the other NPPC Modules
+Import-Module NPPC-Log-Functions -DisableNameChecking
+
+# Loading NPPC ActiveDirectory Functions for this Script
+Import-Module NPPC-ActiveDirectory-Functions -DisableNameChecking
+
+# Loading NPPC Database Functions for this Script
+Import-Module NPPC-Database-Functions -DisableNameChecking
+
+# Loading NPPC General Functions for this Script
+Import-Module NPPC-General-Functions -DisableNameChecking
+
+# Loading NPPC KeePass Functions for this Script
+Import-Module NPPC-KeePass-Functions -DisableNameChecking
+
+# Loading NPPC MESAPPS Functions for this Script
+Import-Module NPPC-MESAPPS-Functions -DisableNameChecking
+
+# Loading Common Properties
+# NOTE:  This is the local Plant Parameter and Property File.
+# make sure that it has been configured for the local 
+# plant/installation before using.
+Import-Module NPECommonProperties.psm1
+
+# Loading the Active Directory Module from Microsoft
+Import-Module ActiveDirectory
+
+#===========================================================================
+# Functions
+#===========================================================================
+Function Test-ADCredentials ($username, $password, $domain)
+{
+    if ($username -eq "") 
+    {
+	    $username = Read-Host "Enter an Active Directory username."
+	}
+	if ($password -eq "") 
+    {
+	    $SecurePassword = Read-Host "Enter the assumed password for $username." -AsSecureString
+		$password = [Runtime.InteropServices.Marshal]::PtrToStringAuto([Runtime.InteropServices.Marshal]::SecureStringToBSTR($SecurePassword))
+    }
+	Add-Type -AssemblyName System.DirectoryServices.AccountManagement
+	$ct = [System.DirectoryServices.AccountManagement.ContextType]::Domain
+	$pc = New-Object System.DirectoryServices.AccountManagement.PrincipalContext($ct, $domain)
+	if ($pc.ValidateCredentials($username, $password)) 
+    {
+		Write-Host "You typed the correct password for $username."
+	}else{
+		Write-Host "You DID NOT type the correct password for $username."
+	}
+}
+
+#===========================================================================
+Function Test-IDExistence ($username, $domain)
+{
+	if ($username -eq "") 
+    {
+		$username = Read-Host "Enter an Active Directory username"
+	}
+	if (Get-ADUser -Filter {SamAccountName -eq $username}) 
+    {
+		Write-Host "User $username exists."
+		Get-ADUser -Identity $username 
+	}else{
+		Write-Host "User $username DOES NOT exist."
+	}
+}		
+
+#===========================================================================
+Function Change-ADCredentials ($userid, $oldpassword, $newpassword, $domain) 
+{
+    if ($userid -eq "") 
+    {
+		$userid = Read-Host "Enter an Active Directory username for which you want to change the password."
+	}
+    if ($newpassword -eq "") 
+    {
+		$SecurePassword = Read-Host "Enter the new password for $username." -AsSecureString
+		$newpassword = [Runtime.InteropServices.Marshal]::PtrToStringAuto([Runtime.InteropServices.Marshal]::SecureStringToBSTR($SecurePassword))
+	}
+	Write-Host " "
+	Write-Host "You are asking to change the password for "  -NoNewLine
+    Write-Host $userid -foregroundcolor "yellow"
+	Write-Host "to the new password of " -NoNewLine
+	Write-Host $newpassword -foregroundcolor "yellow"
+	Write-Host "in the " -NoNewLine
+	Write-Host $domain -foregroundcolor "yellow" -NoNewLine
+	Write-Host " domain.  Please verify the information before proceeding."
+	Write-Host " "
+    $options = Read-Host "Do you want to change the password for $userid? (Y,N)"
+    if ($options -eq "Y")
+    {
+        Set-ADAccountPassword -Identity $userid -Newpassword $SecurePassword -Reset -PassThru
+        <#	Set-ADAccountPassword -Identity $username -Reset  #>
+    }else{
+        Write-Host "You did not select 'Y' so we are exiting."
+    }
+}
+
+#===========================================================================
+Function Change-ADKPServiceCredentials ($userid, $oldpassword, $newpassword, $domain) 
+{
+    if ($userid -eq "") 
+    {
+	    $userid = Read-Host "Enter an Active Directory username for which you want to change the password."
+    }
+    if ($newpassword -eq "") 
+    {
+        $PasswordMethod = Read-Host "Do you want to enter a password (Y)?  Otherwise the script will create one automatically."	
+        If ($PasswordMethod -eq "Y")
+        {
+    		$SecurePassword = Read-Host "Enter the new password for $username." -AsSecureString
+			$newpassword = [Runtime.InteropServices.Marshal]::PtrToStringAuto([Runtime.InteropServices.Marshal]::SecureStringToBSTR($SecurePassword))
+    		$2ndSecurePassword = Read-Host "Re-enter the new password for $username." -AsSecureString
+			$2ndnewpassword = [Runtime.InteropServices.Marshal]::PtrToStringAuto([Runtime.InteropServices.Marshal]::SecureStringToBSTR($SecurePassword))
+            If ($newpassword -eq $2ndnewpassword)
+            {
+                Log-NPEWrite $ScriptLogFullName "Passwords match, we will continue." $True
+            }Else{
+                Log-NPEWrite $ScriptLogFullName "Passwords do not match, we will be exiting." $True
+                Log-NPEFinish $ScriptLogFullName
+            }
+        }Else{
+            $newpassword = New-NPEPassword 16
+            $SecurePassword = Convert-NPETextToSecureString $newpassword
+        }
+    }Else{
+        Log-NPEWrite $ScriptLogFullName "Will use the password for $($userid) that was supplied as a command parameter." $True
+    }
+
+    ##########################################################  
+    Log-NPEWrite $ScriptLogFullName "####################################" $true
+    Log-NPEWrite $ScriptLogFullName "Making Sure ID exists in AD." $true
+    ##########################################################  
+    $IDExists = Test-NPEACtiveDirectoryObjectExistence  $userid  $NPPC_LDAPLMSContainer "User"
+    If ($IDExists -eq $True)
+    {
+        Log-NPEWrite $ScriptLogFullName "* * - $($userid) exists in AD." $true
+    } # EndIf IDExists
+    Else
+    {
+        Log-NPEWrite $ScriptLogFullName "$($userid) DOES NOT exist in Active Directory." $False
+        Log-NPEWrite $ScriptLogFullName  "* * - This Script is assuming an Update.  PLEASE CORRECT THE SITUATION BEFORE CONTINUING" $true
+        Log-NPEFinish $ScriptLogFullName
+        exit
+    } # End Else IDExists
+
+    ##########################################################  
+    Log-NPEWrite $ScriptLogFullName "####################################" $true
+    Log-NPEWrite $ScriptLogFullName "Making Sure KeePass Executable directory exist." $true
+    ##########################################################  
+    if (test-Path $NPPC_KeepassDIR)
+    { 
+       Log-NPEWrite $ScriptLogFullName "* * - KeePass Executable files $($NPPC_KeepassDIR) exists." $true
+    } # End If TestPath
+    Else
+    { 
+       Log-NPEWrite $ScriptLogFullName "* * - KeePass Executable files $($NPPC_KeepassDIR) do not exist. Exiting" $true
+    } # End Else TestPath
+
+    ##########################################################  
+    Log-NPEWrite $ScriptLogFullName "####################################" $true
+    Log-NPEWrite $ScriptLogFullName "Testing the existance of the Keepass file." $true
+    ##########################################################  
+    if (test-Path $NPPC_ServiceKeepassFile)
+    { 
+       Log-NPEWrite $ScriptLogFullName "KeePass Data file $($NPPC_ServiceKeePassFile) exists." $true
+    }Else{ 
+       Log-NPEWrite $ScriptLogFullName "KeePass Data file $($NPPC_ServiceKeePassFile) does not exist.  Exiting." $true
+       Log-NPEFinish $ScriptLogFullName
+       Exit
+    }
+    If($NPPC_ServiceKeePassFileKey){
+        Log-NPEWrite $ScriptLogFullName "####################################" $true
+        Log-NPEWrite $ScriptLogFullName "Testing the existance of the KeePass Keyfile." $true
+        if (test-Path $NPPC_ServiceKeepassFileKey)  
+        {
+            Log-NPEWrite $ScriptLogFullName "KeePass Key file $($NPPC_ServiceKeePassFileKey) exists." $true
+        }Else{ 
+            Log-NPEWrite $ScriptLogFullName "KeePass Key file $($NPPC_ServiceKeePassFileKey) does not exist.  Exiting." $true
+            Log-NPEFinish $ScriptLogFullName
+            Exit
+        }
+        Log-NPEWrite $ScriptLogFullName "==========" $true
+    }
+
+    ##########################################################  
+    # Getting Password for KeePass File
+    ##########################################################  
+    $KeePassPasswordHash = "$($NPPC_PowerShellDir)\HashFiles\KeePass.hash"
+    If(Test-Path $KeePassPasswordHash)
+    {
+        $KeePassSecurePassword = Get-Content $KeePassPasswordHash | ConvertTo-SecureString 
+        $BSTR = [System.Runtime.InteropServices.Marshal]::SecureStringToBSTR($KeepassSecurePassword)
+        $KeepassTextPassword = [System.Runtime.InteropServices.Marshal]::PtrToStringAuto($BSTR)
+    }else{
+        Log-NPEWrite $ScriptLogFullName "The KeePass password hash file at $($KeePassPasswordHash) was not found." $true
+        Log-NPEWrite $ScriptLogFullName "We are asking for the KeePass password." $true
+        $KeepassSecurePassword = Read-Host -Prompt "Enter the Keepass File Password: " -AsSecureString
+        $BSTR = [System.Runtime.InteropServices.Marshal]::SecureStringToBSTR($KeepassSecurePassword)
+        $KeepassTextPassword = [System.Runtime.InteropServices.Marshal]::PtrToStringAuto($BSTR)
+        If ($TestOnly)
+        {
+            Log-NPEWrite $ScriptLogFullName "KeePass hash file will not be created." $true
+        }
+        Else
+        {
+            $CreateKPHash = Read-Host -Prompt "Should a Hash file be created? (Y/N)"
+            If ($CreateKPHash -eq "Y")
+            {
+                $KeePassSecurePassword | ConvertFrom-SecureString | Out-File $KeePassPasswordHash
+                If(Test-Path $KeePassPasswordHash)
+                {
+                    Log-NPEWrite $ScriptLogFullName "KeePass hash file was created." $true
+                }else{
+                    Log-NPEWrite $ScriptLogFullName "KeePass hash file was NOT created." $true
+                }
+            }else{
+                Log-NPEWrite $ScriptLogFullName "KeePass hash file will not be created." $true
+            }
+        }
+    }
+
+    ##########################################################  
+    Log-NPEWrite $ScriptLogFullName "####################################" $true
+    Log-NPEWrite $ScriptLogFullName "Checking for existance of the ID in KeePass Files." $true
+    ##########################################################  
+    $TestIDKPExistence = Test-NPEKeePassID $userid $NPPC_ServiceKeePassFile $KeepassTextPassword $NPPC_KeePassDir $NPPC_ServiceKeePassFileKey
+    if($TestIDKPExistence){
+       Log-NPEWrite $ScriptLogFullName "Calling Test-NPEKeePassID returns a result of $($TestIDKPExistence)" $true
+    }Else{
+       Log-NPEWrite $ScriptLogFullName "Calling Test-NPEKeePassID returns a result of $($TestIDKPExistence)" $true
+       Log-NPEWrite $ScriptLogFullName  "- This Script is assuming an ID to Update.  PLEASE CORRECT THE SITUATION BEFORE CONTINUING" $true
+       Log-NPEFinish $ScriptLogFullName
+       Exit
+    }
+    Log-NPEWrite $ScriptLogFullName "==========" $true
+	Write-Host " "
+	Write-Host "You are asking to change the password for "  -NoNewLine
+	Write-Host $userid -foregroundcolor "yellow"
+	Write-Host "to the new password of " -NoNewLine
+	Write-Host $newpassword -foregroundcolor "yellow"
+	Write-Host "in the " -NoNewLine
+	Write-Host $domain -foregroundcolor "yellow" -NoNewLine
+    Write-Host " domain.  Please verify the information before proceeding."
+    Write-Host " "
+	$options = Read-Host "Do you want to change the password for $($userid) in AD as well as KeePass? (Y,N)"
+	if ($options -eq "Y")
+	{
+        Set-ADAccountPassword -Identity $userid -Newpassword $SecurePassword -Reset -PassThru
+        Log-NPEWrite $ScriptLogFullName "$($userid) password changed successfully in AD." $true
+#Write-Host "-------------"
+#Write-Host "userid"
+#$userid.GetType()
+#$userid 
+#Write-Host "-------------"
+#Write-Host "NPPC_ServiceKeePassFile"
+#$NPPC_ServiceKeePassFile.GetType()
+#$NPPC_ServiceKeePassFile 
+#Write-Host "-------------"
+#Write-Host "KeepassTextPassword"
+#$KeepassTextPassword.GetType()
+#$KeepassTextPassword 
+#Write-Host "-------------"
+#Write-Host "NewPassword"
+#$NewPassword.GetType()
+#$NewPassword 
+#Write-Host "-------------"
+#Write-Host "NPPC_KeePassDir"
+#$NPPC_KeePassDir.GetType()
+#$NPPC_KeePassDir 
+#Write-Host "-------------"
+#Write-Host "NPPC_ServiceKeePassFileKey"
+#$NPPC_ServiceKeePassFileKey.GetType()
+#$NPPC_ServiceKeePassFileKey
+#If($NPPC_ServiceKeePassFileKey -eq ""){
+#  Write-Host "Is an empty string"
+#}Else{
+#  Write-Host "Is Not an empty string"
+#}
+#If($NPPC_ServiceKeePassFileKey -eq $Null){
+#  Write-Host "Is Null"
+#}Else{
+#  Write-Host "Is Not Null"
+#}
+#Write-Host "-------------"
+        $Success = Edit-NPEKeePassIDPassword $userid $NPPC_ServiceKeePassFile $KeepassTextPassword $NewPassword $NPPC_KeePassDir $NPPC_ServiceKeePassFileKey
+        if ($Success)
+        { 
+            Log-NPEWrite $ScriptLogFullName "$($userid) password changed successfully in KeePass." $true
+            $BodyTempKPPWChg += "<br>KeePass Password was changed."
+        }Else{ 
+            Log-NPEWrite $ScriptLogFullName "$($userid) password change had an issue in KeePass." $true
+            $BodyTempKPPWChg += "<br>KeePass Password was <font color=red>NOT CHANGED</font>."
+        } # EndIf
+    }else{
+        Write-Host "You did not select 'Y' so we are exiting."
+    }
+}
+#===========================================================================
+Function Change-ADKPApplicationCredentials ($userid, $oldpassword, $newpassword, $domain) 
+{
+    if ($userid -eq "") 
+    {
+	    $userid = Read-Host "Enter an Active Directory username for which you want to change the password."
+    }
+    if ($newpassword -eq "") 
+    {
+        $PasswordMethod = Read-Host "Do you want to enter a password (Y)?  Otherwise the script will create one automatically."	
+        If ($PasswordMethod = "Y")
+        {
+    		$SecurePassword = Read-Host "Enter the new password for $username." -AsSecureString
+			$newpassword = [Runtime.InteropServices.Marshal]::PtrToStringAuto([Runtime.InteropServices.Marshal]::SecureStringToBSTR($SecurePassword))
+    		$2ndSecurePassword = Read-Host "Re-enter the new password for $username." -AsSecureString
+			$2ndnewpassword = [Runtime.InteropServices.Marshal]::PtrToStringAuto([Runtime.InteropServices.Marshal]::SecureStringToBSTR($SecurePassword))
+            If ($newpassword -eq $2ndnewpassword)
+            {
+                Log-NPEWrite $ScriptLogFullName "Passwords match, we will continue." $True
+            }Else{
+                Log-NPEWrite $ScriptLogFullName "Passwords do not match, we will be exiting." $True
+                Log-NPEFinish $ScriptLogFullName
+            }
+        }Else{
+            $newpassword = New-NPEPassword 16
+        }
+    }Else{
+        Log-NPEWrite $ScriptLogFullName "Will use the password for $($userid) that was supplied as a command parameter." $True
+    }
+
+    ##########################################################  
+    Log-NPEWrite $ScriptLogFullName "####################################" $true
+    Log-NPEWrite $ScriptLogFullName "Making Sure ID exists in AD." $true
+    ##########################################################  
+    $IDExists = Test-NPEACtiveDirectoryObjectExistence  $userid  $NPPC_LDAPLMSContainer "User"
+    If ($IDExists -eq $True)
+    {
+        Log-NPEWrite $ScriptLogFullName "* * - $($userid) exists in AD." $true
+    } # EndIf IDExists
+    Else
+    {
+        Log-NPEWrite $ScriptLogFullName "$($userid) DOES NOT exist in Active Directory." $False
+        Log-NPEWrite $ScriptLogFullName  "* * - This Script is assuming an Update.  PLEASE CORRECT THE SITUATION BEFORE CONTINUING" $true
+        Log-NPEFinish $ScriptLogFullName
+        exit
+    } # End Else IDExists
+
+    ##########################################################  
+    Log-NPEWrite $ScriptLogFullName "####################################" $true
+    Log-NPEWrite $ScriptLogFullName "Making Sure KeePass Executable directory exist." $true
+    ##########################################################  
+    if (test-Path $NPPC_KeepassDIR)
+    { 
+       Log-NPEWrite $ScriptLogFullName "* * - KeePass Executable files $($NPPC_KeepassDIR) exists." $true
+    } # End If TestPath
+    Else
+    { 
+       Log-NPEWrite $ScriptLogFullName "* * - KeePass Executable files $($NPPC_KeepassDIR) do not exist. Exiting" $true
+    } # End Else TestPath
+
+    ##########################################################  
+    Log-NPEWrite $ScriptLogFullName "####################################" $true
+    Log-NPEWrite $ScriptLogFullName "Testing the existance of the Keepass file." $true
+    ##########################################################  
+    if (test-Path $NPPC_ApplicationKeepassFile)
+    { 
+       Log-NPEWrite $ScriptLogFullName "KeePass Data file $($NPPC_ApplicationKeePassFile) exists." $true
+    }Else{ 
+       Log-NPEWrite $ScriptLogFullName "KeePass Data file $($NPPC_ApplicationPassFile) does not exist.  Exiting." $true
+       Log-NPEFinish $ScriptLogFullName
+       Exit
+    }
+    If($NPPC_APplicationKeePassFileKey){
+        Log-NPEWrite $ScriptLogFullName "####################################" $true
+        Log-NPEWrite $ScriptLogFullName "Testing the existance of the KeePass Keyfile." $true
+        if (test-Path $NPPC_ApplicationKeepassFileKey)  
+        {
+            Log-NPEWrite $ScriptLogFullName "KeePass Key file $($NPPC_ApplicationKeePassFileKey) exists." $true
+        }Else{ 
+            Log-NPEWrite $ScriptLogFullName "KeePass Key file $($NPPC_ApplicationKeePassFileKey) does not exist.  Exiting." $true
+            Log-NPEFinish $ScriptLogFullName
+            Exit
+        }
+        Log-NPEWrite $ScriptLogFullName "==========" $true
+    }
+
+    ##########################################################  
+    # Getting Password for KeePass File
+    ##########################################################  
+    $KeePassPasswordHash = "$($NPPC_PowerShellDir)\HashFiles\KeePassApplication.hash"
+    If(Test-Path $KeePassPasswordHash)
+    {
+        $KeePassSecurePassword = Get-Content $KeePassPasswordHash | ConvertTo-SecureString 
+        $BSTR = [System.Runtime.InteropServices.Marshal]::SecureStringToBSTR($KeepassSecurePassword)
+        $KeepassTextPassword = [System.Runtime.InteropServices.Marshal]::PtrToStringAuto($BSTR)
+    }else{
+        Log-NPEWrite $ScriptLogFullName "The KeePass password hash file at $($KeePassPasswordHash) was not found." $true
+        Log-NPEWrite $ScriptLogFullName "We are asking for the KeePass password." $true
+        $KeepassSecurePassword = Read-Host -Prompt "Enter the Keepass File Password: " -AsSecureString
+        $BSTR = [System.Runtime.InteropServices.Marshal]::SecureStringToBSTR($KeepassSecurePassword)
+        $KeepassTextPassword = [System.Runtime.InteropServices.Marshal]::PtrToStringAuto($BSTR)
+        If ($TestOnly)
+        {
+            Log-NPEWrite $ScriptLogFullName "KeePass hash file will not be created." $true
+        }
+        Else
+        {
+            $CreateKPHash = Read-Host -Prompt "Should a Hash file be created? (Y/N)"
+            If ($CreateKPHash -eq "Y")
+            {
+                $KeePassSecurePassword | ConvertFrom-SecureString | Out-File $KeePassPasswordHash
+                If(Test-Path $KeePassPasswordHash)
+                {
+                    Log-NPEWrite $ScriptLogFullName "KeePass hash file was created." $true
+                }else{
+                    Log-NPEWrite $ScriptLogFullName "KeePass hash file was NOT created." $true
+                }
+            }else{
+                Log-NPEWrite $ScriptLogFullName "KeePass hash file will not be created." $true
+            }
+        }
+    }
+
+    ##########################################################  
+    Log-NPEWrite $ScriptLogFullName "####################################" $true
+    Log-NPEWrite $ScriptLogFullName "Checking for existance of the ID in KeePass Files." $true
+    ##########################################################  
+    $TestIDKPExistence = Test-NPEKeePassID $userid $NPPC_ApplicationKeePassFile $KeepassTextPassword $NPPC_KeePassDir $NPPC_ApplicationKeePassFileKey
+    if($TestIDKPExistence){
+       Log-NPEWrite $ScriptLogFullName "Calling Test-NPEKeePassID returns a result of $($TestIDKPExistence)" $true
+    }Else{
+       Log-NPEWrite $ScriptLogFullName "Calling Test-NPEKeePassID returns a result of $($TestIDKPExistence)" $true
+       Log-NPEWrite $ScriptLogFullName  "- This Script is assuming an ID to Update.  PLEASE CORRECT THE SITUATION BEFORE CONTINUING" $true
+       Log-NPEFinish $ScriptLogFullName
+       Exit
+    }
+    Log-NPEWrite $ScriptLogFullName "==========" $true
+	Write-Host " "
+	Write-Host "You are asking to change the password for "  -NoNewLine
+	Write-Host $userid -foregroundcolor "yellow"
+	Write-Host "to the new password of " -NoNewLine
+	Write-Host $newpassword -foregroundcolor "yellow"
+	Write-Host "in the " -NoNewLine
+	Write-Host $domain -foregroundcolor "yellow" -NoNewLine
+    Write-Host " domain.  Please verify the information before proceeding."
+    Write-Host " "
+	$options = Read-Host "Do you want to change the password for $($userid) in AD as well as KeePass? (Y,N)"
+	if ($options -eq "Y")
+	{
+        Set-ADAccountPassword -Identity $userid -Newpassword $SecurePassword -Reset -PassThru
+        Log-NPEWrite $ScriptLogFullName "$($userid) password changed successfully in AD." $true
+#Write-Host "-------------"
+#Write-Host "userid"
+#$userid.GetType()
+#$userid 
+#Write-Host "-------------"
+#Write-Host "NPPC_ApplicationKeePassFile"
+#$NPPC_ApplicationKeePassFile.GetType()
+#$NPPC_SpplicationKeePassFile 
+#Write-Host "-------------"
+#Write-Host "KeepassTextPassword"
+#$KeepassTextPassword.GetType()
+#$KeepassTextPassword 
+#Write-Host "-------------"
+#Write-Host "NewPassword"
+#$NewPassword.GetType()
+#$NewPassword 
+#Write-Host "-------------"
+#Write-Host "NPPC_KeePassDir"
+#$NPPC_KeePassDir.GetType()
+#$NPPC_KeePassDir 
+#Write-Host "-------------"
+#Write-Host "NPPC_ApplicationKeePassFileKey"
+#$NPPC_ApplicationKeePassFileKey.GetType()
+#$NPPC_ApplicationKeePassFileKey
+#If($NPPC_ApplicationKeePassFileKey -eq ""){
+#  Write-Host "Is an empty string"
+#}Else{
+#  Write-Host "Is Not an empty string"
+#}
+#If($NPPC_ApplicationKeePassFileKey -eq $Null){
+#  Write-Host "Is Null"
+#}Else{
+#  Write-Host "Is Not Null"
+#}
+#Write-Host "-------------"
+        $Success = Edit-NPEKeePassIDPassword $userid $NPPC_ApplicationKeePassFile $KeepassTextPassword $NewPassword $NPPC_KeePassDir $NPPC_ApplicationKeePassFileKey
+        if ($Success)
+        { 
+            Log-NPEWrite $ScriptLogFullName "$($userid) password changed successfully in KeePass." $true
+            $BodyTempKPPWChg += "<br>KeePass Password was changed."
+        }Else{ 
+            Log-NPEWrite $ScriptLogFullName "$($userid) password change had an issue in KeePass." $true
+            $BodyTempKPPWChg += "<br>KeePass Password was <font color=red>NOT CHANGED</font>."
+        } # EndIf
+    }else{
+        Write-Host "You did not select 'Y' so we are exiting."
+    }
+}
+
+#===========================================================================
+Function Change-ADKPWorkstationCredentials ($userid, $oldpassword, $newpassword, $domain) 
+{
+    if ($userid -eq "") 
+    {
+	    $userid = Read-Host "Enter an Active Directory username for which you want to change the password."
+    }
+    if ($newpassword -eq "") 
+    {
+        $PasswordMethod = Read-Host "Do you want to enter a password (Y)?  Otherwise the script will create one automatically."	
+        If ($PasswordMethod = "Y")
+        {
+    		$SecurePassword = Read-Host "Enter the new password for $username." -AsSecureString
+			$newpassword = [Runtime.InteropServices.Marshal]::PtrToStringAuto([Runtime.InteropServices.Marshal]::SecureStringToBSTR($SecurePassword))
+    		$2ndSecurePassword = Read-Host "Re-enter the new password for $username." -AsSecureString
+			$2ndnewpassword = [Runtime.InteropServices.Marshal]::PtrToStringAuto([Runtime.InteropServices.Marshal]::SecureStringToBSTR($SecurePassword))
+            If ($newpassword -eq $2ndnewpassword)
+            {
+                Log-NPEWrite $ScriptLogFullName "Passwords match, we will continue." $True
+            }Else{
+                Log-NPEWrite $ScriptLogFullName "Passwords do not match, we will be exiting." $True
+                Log-NPEFinish $ScriptLogFullName
+            }
+        }Else{
+            $newpassword = New-NPEPassword 16
+        }
+    }Else{
+        Log-NPEWrite $ScriptLogFullName "Will use the password for $($userid) that was supplied as a command parameter." $True
+    }
+
+    ##########################################################  
+    Log-NPEWrite $ScriptLogFullName "####################################" $true
+    Log-NPEWrite $ScriptLogFullName "Making Sure ID exists in AD." $true
+    ##########################################################  
+    $IDExists = Test-NPEACtiveDirectoryObjectExistence  $userid  $NPPC_LDAPLMSContainer "User"
+    If ($IDExists -eq $True)
+    {
+        Log-NPEWrite $ScriptLogFullName "* * - $($userid) exists in AD." $true
+    } # EndIf IDExists
+    Else
+    {
+        Log-NPEWrite $ScriptLogFullName "$($userid) DOES NOT exist in Active Directory." $False
+        Log-NPEWrite $ScriptLogFullName  "* * - This Script is assuming an Update.  PLEASE CORRECT THE SITUATION BEFORE CONTINUING" $true
+        Log-NPEFinish $ScriptLogFullName
+        exit
+    } # End Else IDExists
+
+    ##########################################################  
+    Log-NPEWrite $ScriptLogFullName "####################################" $true
+    Log-NPEWrite $ScriptLogFullName "Making Sure KeePass Executable directory exist." $true
+    ##########################################################  
+    if (test-Path $NPPC_KeepassDIR)
+    { 
+       Log-NPEWrite $ScriptLogFullName "* * - KeePass Executable files $($NPPC_KeepassDIR) exists." $true
+    } # End If TestPath
+    Else
+    { 
+       Log-NPEWrite $ScriptLogFullName "* * - KeePass Executable files $($NPPC_KeepassDIR) do not exist. Exiting" $true
+    } # End Else TestPath
+
+    ##########################################################  
+    Log-NPEWrite $ScriptLogFullName "####################################" $true
+    Log-NPEWrite $ScriptLogFullName "Testing the existance of the Keepass file." $true
+    ##########################################################  
+    if (test-Path $NPPC_WorkstationKeepassFile)
+    { 
+       Log-NPEWrite $ScriptLogFullName "KeePass Data file $($NPPC_WorkstationKeePassFile) exists." $true
+    }Else{ 
+       Log-NPEWrite $ScriptLogFullName "KeePass Data file $($NPPC_WorkstationPassFile) does not exist.  Exiting." $true
+       Log-NPEFinish $ScriptLogFullName
+       Exit
+    }
+    If($NPPC_WorkstationKeePassFileKey){
+        Log-NPEWrite $ScriptLogFullName "####################################" $true
+        Log-NPEWrite $ScriptLogFullName "Testing the existance of the KeePass Keyfile." $true
+        if (test-Path $NPPC_WorkstationKeepassFileKey)  
+        {
+            Log-NPEWrite $ScriptLogFullName "KeePass Key file $($NPPC_WorkstationKeePassFileKey) exists." $true
+        }Else{ 
+            Log-NPEWrite $ScriptLogFullName "KeePass Key file $($NPPC_WorkstationKeePassFileKey) does not exist.  Exiting." $true
+            Log-NPEFinish $ScriptLogFullName
+            Exit
+        }
+        Log-NPEWrite $ScriptLogFullName "==========" $true
+    }
+
+    ##########################################################  
+    # Getting Password for KeePass File
+    ##########################################################  
+    $KeePassPasswordHash = "$($NPPC_PowerShellDir)\HashFiles\KeePassWorkstation.hash"
+    If(Test-Path $KeePassPasswordHash)
+    {
+        $KeePassSecurePassword = Get-Content $KeePassPasswordHash | ConvertTo-SecureString 
+        $BSTR = [System.Runtime.InteropServices.Marshal]::SecureStringToBSTR($KeepassSecurePassword)
+        $KeepassTextPassword = [System.Runtime.InteropServices.Marshal]::PtrToStringAuto($BSTR)
+    }else{
+        Log-NPEWrite $ScriptLogFullName "The KeePass password hash file at $($KeePassPasswordHash) was not found." $true
+        Log-NPEWrite $ScriptLogFullName "We are asking for the KeePass password." $true
+        $KeepassSecurePassword = Read-Host -Prompt "Enter the Keepass File Password: " -AsSecureString
+        $BSTR = [System.Runtime.InteropServices.Marshal]::SecureStringToBSTR($KeepassSecurePassword)
+        $KeepassTextPassword = [System.Runtime.InteropServices.Marshal]::PtrToStringAuto($BSTR)
+        If ($TestOnly)
+        {
+            Log-NPEWrite $ScriptLogFullName "KeePass hash file will not be created." $true
+        }
+        Else
+        {
+            $CreateKPHash = Read-Host -Prompt "Should a Hash file be created? (Y/N)"
+            If ($CreateKPHash -eq "Y")
+            {
+                $KeePassSecurePassword | ConvertFrom-SecureString | Out-File $KeePassPasswordHash
+                If(Test-Path $KeePassPasswordHash)
+                {
+                    Log-NPEWrite $ScriptLogFullName "KeePass hash file was created." $true
+                }else{
+                    Log-NPEWrite $ScriptLogFullName "KeePass hash file was NOT created." $true
+                }
+            }else{
+                Log-NPEWrite $ScriptLogFullName "KeePass hash file will not be created." $true
+            }
+        }
+    }
+
+    ##########################################################  
+    Log-NPEWrite $ScriptLogFullName "####################################" $true
+    Log-NPEWrite $ScriptLogFullName "Checking for existance of the ID in KeePass Files." $true
+    ##########################################################  
+    $TestIDKPExistence = Test-NPEKeePassID $userid $NPPC_WorkstationKeePassFile $KeepassTextPassword $NPPC_KeePassDir $NPPC_WorkstationKeePassFileKey
+    if($TestIDKPExistence){
+       Log-NPEWrite $ScriptLogFullName "Calling Test-NPEKeePassID returns a result of $($TestIDKPExistence)" $true
+    }Else{
+       Log-NPEWrite $ScriptLogFullName "Calling Test-NPEKeePassID returns a result of $($TestIDKPExistence)" $true
+       Log-NPEWrite $ScriptLogFullName  "- This Script is assuming an ID to Update.  PLEASE CORRECT THE SITUATION BEFORE CONTINUING" $true
+       Log-NPEFinish $ScriptLogFullName
+       Exit
+    }
+    Log-NPEWrite $ScriptLogFullName "==========" $true
+	Write-Host " "
+	Write-Host "You are asking to change the password for "  -NoNewLine
+	Write-Host $userid -foregroundcolor "yellow"
+	Write-Host "to the new password of " -NoNewLine
+	Write-Host $newpassword -foregroundcolor "yellow"
+	Write-Host "in the " -NoNewLine
+	Write-Host $domain -foregroundcolor "yellow" -NoNewLine
+    Write-Host " domain.  Please verify the information before proceeding."
+    Write-Host " "
+	$options = Read-Host "Do you want to change the password for $($userid) in AD as well as KeePass? (Y,N)"
+	if ($options -eq "Y")
+	{
+        Set-ADAccountPassword -Identity $userid -Newpassword $SecurePassword -Reset -PassThru
+        Log-NPEWrite $ScriptLogFullName "$($userid) password changed successfully in AD." $true
+#Write-Host "-------------"
+#Write-Host "userid"
+#$userid.GetType()
+#$userid 
+#Write-Host "-------------"
+#Write-Host "NPPC_WorkstationKeePassFile"
+#$NPPC_WorkstationKeePassFile.GetType()
+#$NPPC_WorkstationKeePassFile 
+#Write-Host "-------------"
+#Write-Host "KeepassTextPassword"
+#$KeepassTextPassword.GetType()
+#$KeepassTextPassword 
+#Write-Host "-------------"
+#Write-Host "NewPassword"
+#$NewPassword.GetType()
+#$NewPassword 
+#Write-Host "-------------"
+#Write-Host "NPPC_KeePassDir"
+#$NPPC_KeePassDir.GetType()
+#$NPPC_KeePassDir 
+#Write-Host "-------------"
+#Write-Host "NPPC_WorkstationKeePassFileKey"
+#$NPPC_WorkstationKeePassFileKey.GetType()
+#$NPPC_WorkstationKeePassFileKey
+#If($NPPC_WorkstationKeePassFileKey -eq ""){
+#  Write-Host "Is an empty string"
+#}Else{
+#  Write-Host "Is Not an empty string"
+#}
+#If($NPPC_WorkstationKeePassFileKey -eq $Null){
+#  Write-Host "Is Null"
+#}Else{
+#  Write-Host "Is Not Null"
+#}
+#Write-Host "-------------"
+        $Success = Edit-NPEKeePassIDPassword $userid $NPPC_WorkstationKeePassFile $KeepassTextPassword $NewPassword $NPPC_KeePassDir $NPPC_WorkstationKeePassFileKey
+        if ($Success)
+        { 
+            Log-NPEWrite $ScriptLogFullName "$($userid) password changed successfully in KeePass." $true
+            $BodyTempKPPWChg += "<br>KeePass Password was changed."
+        }Else{ 
+            Log-NPEWrite $ScriptLogFullName "$($userid) password change had an issue in KeePass." $true
+            $BodyTempKPPWChg += "<br>KeePass Password was <font color=red>NOT CHANGED</font>."
+        } # EndIf
+    }else{
+        Write-Host "You did not select 'Y' so we are exiting."
+    }
+}
+
+#===========================================================================
+Function InitialMenu 
+{
+    $result = $null
+    Write-Host "This application will allow you to perform several different operations."
+    Write-Host "Please choose from the menu below on what you want to do:"
+    Write-Host " "
+    Write-Host "1) Check if you know the proper password for a given User ID."
+    Write-Host "2) Find the Active Directory home for a given User ID."
+    Write-Host "3) Change a password for a given User ID.  Do not change in KeePass."
+    Write-Host "4) Change a password for a given User ID.  Also change password in KeePass Service File."
+    Write-Host "5) Change a password for a given User ID.  Also change password in KeePass Application File."
+    Write-Host "6) Change a password for a given User ID.  Also change password in KeePass Workstation File."
+    Write-Host "0) Exit"
+    Write-Host " "
+    $options = [System.Management.Automation.Host.ChoiceDescription[]](0,1,2,3,4,5,6)
+    $result = $host.ui.PromptForChoice("Action","Please enter the number for your selection:",$options,0)
+    switch ($result)
+	{
+		0 {"You Selected 0.";Exit}
+		1 {"You Selected 1.";Test-ADCredentials $UserID $OldPW $Domain}
+		2 {"You Selected 2.";Test-IDExistence $UserID}
+		3 {"You Selected 3.";Change-ADCredentials $UserID $OldPW $NewPW $Domain}
+		4 {"You Selected 4.";Change-ADKPServiceCredentials $UserID $OldPW $NewPW $Domain}
+		5 {"You Selected 5.";Change-ADKPApplicationCredentials $UserID $OldPW $NewPW $Domain}
+		6 {"You Selected 6.";Change-ADKPWorkstationCredentials $UserID $OldPW $NewPW $Domain}
+	}
+}
+
+#===========================================================================
+#===========================================================================
+# Main Code
+#===========================================================================
+#===========================================================================
+
+########################################################
+# SCRIPT SPECIFIC CONSTANTS                            #
+########################################################
+# DEFAULTS:  All scripts should have these variables 
+########################################################
+
+# In most cases it makes sense to use the file name less the suffix.
+$GLobal:ScriptName              = "AD-IDTools"
+$Global:ScriptVersion           = "1.2"
+
+########################################################
+### Should not need to edit these variables
+########################################################
+# We'll get our unique time-stamp for our log file
+$Global:TempTimeStamp           =  Get-NPEUniqueTimeStamp
+# Creating a unique Log-File name for this script
+$Global:ScriptLogName           =  "$($ScriptName)-$($TempTimeStamp).log"
+# Using Common Properties to build the full UNC for the log file
+$Global:ScriptLogFullName       =  $NPPC_MESAPPSLogDir + "\" + $ScriptLogName
+
+#########################################################  
+# LOG START
+#########################################################  
+Log-NPEStart $NPPC_MESAPPSLogDir $ScriptLogName $ScriptVersion
+
+#########################################################  
+# New Code Section
+#########################################################  
+
+### The next two lines will write to log file as well as screen.
+Log-NPEWrite $ScriptLogFullName "####################################" $true
+Log-NPEWrite $ScriptLogFullName "Begining the AD-ADTools Script:" $true
+### This line will only write out to the log file and will not go to the screen.
+Log-NPEWrite $ScriptLogFullName "This is just a line for the log file. " $false
+
+while ($true){InitialMenu}
+
+Log-NPEFinish $ScriptLogFullName
+Write-Host "We're Done."
+
+
+
+
+
+
+
+
+
+

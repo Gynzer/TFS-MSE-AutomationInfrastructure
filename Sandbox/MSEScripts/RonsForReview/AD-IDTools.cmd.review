@@ -1,0 +1,8 @@
+
+:START
+
+PowerShell -executionpolicy ByPass \\npefileshare.stl.nppcams.nestle.com\msedeployment\Scripts\Compliance\AD-IDTools\AD-IDTools.ps1
+
+GoTo START
+
+pause

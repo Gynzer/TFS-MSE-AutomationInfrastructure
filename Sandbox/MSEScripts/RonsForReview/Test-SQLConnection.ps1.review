@@ -1,0 +1,220 @@
+﻿# ------------------------------------------------------------------------------
+# File: Test-SQLConnection.ps1
+# Desc: Verify client can connect through the firewall
+# ------------------------------------------------------------------------------
+
+function QuerySQLListener{
+#
+# From: "Finding SQL Server Installs Using Powershell" by Wes Brown Microsoft MVP
+# http://sqlserverio.com/2013/02/27/finding-sql-server-installs-using-powershell/
+# Downloaded: 9/24/13
+# -------------------------------------- 
+	[cmdletbinding(
+        DefaultParameterSetName = '',
+        ConfirmImpact = 'low'
+    )]
+    Param(
+        [Parameter(
+            Mandatory = $True,
+            Position = 0,
+            ParameterSetName = '',
+            ValueFromPipeline = $True)]
+        [string]$Computer
+    )
+    Begin {
+        $ErrorActionPreference = 'SilentlyContinue'
+        $Port = 1434
+        $ConnectionTimeout = 1000
+        $Responses  = @();
+    }
+    Process {
+
+       	$IPAddress = [System.Net.Dns]::GetHostEntry($Computer).AddressList[0].IPAddressToString
+        $ToASCII = new-object system.text.asciiencoding
+		$UDPEndpoint = New-Object system.net.ipendpoint([system.net.ipaddress]::Any,0)
+        $UDPPacket = 0x02,0x00,0x00
+
+        $UDPClient = new-Object system.Net.Sockets.Udpclient
+        $UDPClient.client.ReceiveTimeout = $ConnectionTimeout
+        $UDPClient.Connect($IPAddress,$Port)
+		$UDPClient.Client.Blocking = $True
+
+		[void]$UDPClient.Send($UDPPacket, $UDPPacket.length)
+		$BytesRecived = $UDPClient.Receive([ref]$UDPEndpoint)
+		[string]$Response = $ToASCII.GetString($BytesRecived)
+
+		If ($Response) {
+			$Response = $Response.Substring(3,$Response.Length-3).Replace(';;','~')
+			$Response.Split('~') | ForEach {
+				$Responses += $_
+			}
+			$UDPClient.close()
+		}
+    }
+    End {
+        return ,$Responses
+    }
+}
+# ------------------------------------------------------------------------------
+
+function Invoke-SQL {
+#
+# Verify a connection can be made to the provided data source
+# -------------------------------------- 
+    param(
+        [string] $dataSource = "USSTLL4212\PSPAC01",
+        [string] $database = "PSMSE01",
+        [string] $sqlCommand = $(throw "Please specify a query.")
+      )
+
+#    $connectionString = "Data Source=$dataSource; Integrated Security=True; Initial Catalog=$database; Connect Timeout=10"
+    $connectionString = "Data Source=$dataSource; Initial Catalog=$database; Connect Timeout=10; User ID=$UserID; Password=$Password;"
+    $connection = new-object system.data.SqlClient.SQLConnection($connectionString)
+
+    $command = new-object system.data.sqlclient.sqlcommand($sqlCommand,$connection)
+	
+	Try {
+    	$connection.Open()
+	} catch {
+		return, $null
+	}
+
+    $adapter = New-Object System.Data.sqlclient.sqlDataAdapter $command
+    $dataset = New-Object System.Data.DataSet
+    $adapter.Fill($dataSet) | Out-Null
+
+    $connection.Close()
+    $dataSet.Tables
+
+}
+# ------------------------------------------------------------------------------
+
+function Get-MyIPAddress {
+#
+# From: "Getting and Using Your IP Address in Powershell" by Sean McNamara
+# http://unicomsta.blogspot.com/2013/04/getting-and-using-your-ip-address-in.html
+# Downloaded 10/4/2013
+#
+$colItems = Get-WmiObject Win32_NetworkAdapterConfiguration -Namespace "root\CIMV2" | where{$_.IPEnabled -eq “True”}
+
+Write-Host "# --------------------------------------"
+Write-Host "# Local IP address information"
+Write-Host "# --------------------------------------"
+foreach($objItem in $colItems) {
+     Write-Host "Adapter:" $objItem.Description
+     Write-Host "         DNS Domain:" $objItem.DNSDomain
+     Write-Host "         IPv4 Address:" $objItem.IPAddress[0]
+     Write-Host "         IPv6 Address:" $objItem.IPAddress[1]
+     Write-Host " "
+      }
+
+}
+# ------------------------------------------------------------------------------
+
+$PropertyList = ("ServerName", "InstanceName", "IsClustered", "Version", "tcp", "np")
+$DomainList = ($null, ".nestle.com", ".stl.nppcams.nestle.com")
+$AddressList = @()
+$BrowserResponse = @()
+$DataSourceList = @()
+
+#
+Get-MyIPAddress
+
+# Expecting bare hostname
+$Computer  = Read-Host 'Check host name '
+
+Write-Host "# --------------------------------------"
+Write-Host "# DNS Verification"
+Write-Host "# --------------------------------------"
+
+ForEach ($Domain in $DomainList){
+	$ComputerAddress = $Computer + $Domain
+	$IPAddress = $null
+	
+	try {
+		$IPAddress = [System.Net.Dns]::GetHostEntry($ComputerAddress).AddressList[0].IPAddressToString
+	} catch {
+		$IPAddress = $null
+	}
+	
+	if ($IPAddress) {
+		Write-Host "DNS reports IP address for $ComputerAddress is $IPAddress"
+		if ($AddressList -notcontains $ComputerAddress) {
+			$AddressList += $ComputerAddress
+		}
+	}
+	else {
+		Write-Host "DNS lookup failure for $ComputerAddress"
+	}
+}
+
+Write-Host "# --------------------------------------"
+Write-Host "# Check SQL Browser Service Connection"
+Write-Host "# --------------------------------------"
+
+ForEach ($ComputerAddress in $AddressList) {
+	$InstanceProperty=@{}
+	$BrowserResponse = QuerySQLListener($ComputerAddress)
+
+	if ($BrowserResponse) {
+		Write-Host "Browser service listening on $ComputerAddress"
+				
+		ForEach ($Response in $BrowserResponse) {
+		    if ($Response -eq ""){ break }
+			
+			$InstanceData = $Response.split(';')
+			$c = $InstanceData.Count - 1
+			
+			ForEach ($i in 0 .. $c) {
+				if ($PropertyList -contains $InstanceData[$i]) { 
+					$InstanceProperty[$InstanceData[$i]] = $InstanceData[$i + 1]
+				}
+			}
+
+			# Create connection string permutations to check in next step
+			if ($DataSourceList -notcontains $ComputerAddress) {
+				$DataSourceList += $ComputerAddress
+			}
+			if ($DataSourceList -notcontains $ComputerAddress + "\" + $InstanceProperty["InstanceName"]){
+				$DataSourceList += $ComputerAddress + "\" + $InstanceProperty["InstanceName"]
+			}
+			if ($DataSourceList -notcontains $ComputerAddress + ", " + $InstanceProperty["tcp"]){
+				$DataSourceList += $ComputerAddress + ", " + $InstanceProperty["tcp"]
+			}
+		}
+	}
+	else {
+		Write-Host "Browser service connection failure on $ComputerAddress"
+		# Create connection string permutations to check in next step
+		# ... only those that do not require a browser service connection
+		if ($DataSourceList -notcontains $ComputerAddress) {
+			$DataSourceList += $ComputerAddress
+		}
+		if ($DataSourceList -notcontains $ComputerAddress + ", 1433"){
+			$DataSourceList += $ComputerAddress + ", 1433"
+		}
+	}
+}
+
+Write-Host "# --------------------------------------"
+Write-Host "# Check connect string permutations"
+Write-Host "# --------------------------------------"
+
+$UserID  = Read-Host 'UserID: '
+$Password  = Read-Host 'Password: '
+
+ForEach ($ds in $DataSourceList) {
+	
+	$result = Invoke-SQL $ds "master" "select @@SERVICENAME"
+
+	if ($result) {
+		Write-Host "Successful SQL connection to $ds"
+	} else {
+		Write-Host "Failed to connect to $ds"
+	}
+}
+
+Write-Host "# --------------------------------------"
+Write-Host "# Test complete for $Computer"
+Write-Host "# --------------------------------------"
+$Dummy  = Read-Host 'Hit enter to close window '

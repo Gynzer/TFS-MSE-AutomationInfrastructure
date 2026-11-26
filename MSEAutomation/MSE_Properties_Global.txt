@@ -1,0 +1,59 @@
+
+
+From MSECommonProperties.psm1
+
+# Plant Identification Codes
+$GLobal:MSE_PlantCountry               = "US"     # Example from St Louis
+$GLobal:MSE_PlantCode                  = "USSLO"  # Example from St Louis - This should match your location code within Active Directory
+
+# Plant Information
+$Global:MSE_PlantAddress1              = "Thermo Fisher Scientific"     # Example from St Louis
+$Global:MSE_PlantAddress2              = "4766 LaGuardia Dr."           # Example from St Louis
+$Global:MSE_PlantCity                  = "St. Louis"                    # Example from St Louis
+$Global:MSE_PlantState                 = "Missouri"                     # Example from St Louis
+$Global:MSE_PlantZIP                   = "63134-3177"                   # Example from St Louis
+$Global:MSE_PlantPhone                 = "314-426-5000"                 # Example from St Louis
+$Global:MSE_PlantTimeZone              = "CST"                          # Example from St Louis
+
+# Plant OT Emailail
+$Global:MSE_PlantOTEmail               = "USSLO.MSE.Automation@thermofisher.com"  # Example from St Louis
+
+# Short Domain name as used in NT and SMB connections
+$GLobal:MSE_DomainNT                   = "AMER"
+
+# Root DNS domain name - default would be NESTLE.COM
+$GLobal:MSE_DomainDNS                  = "amer.thermo.com"
+
+# LDAP AD Root Name
+$Global:MSE_LDAPRoot                   = "dc=thermo,dc=com"
+
+# MSE Server & Share Information
+$Global:MSE_MailGateway                = ""  # Change for your Plant Location
+$Global:MSE_PSRepository               = "\\server\share"  # Example from St Louis
+
+# Plant Full AD Container name for LMS, FGS, ESS objects as well as Distribution Groups
+$Global:MSE_LDAPBaseContainer          = "dc=thermo,dc=com"                                                                                                       # Example from St Louis
+
+# KeePass Information
+$Global:MSE_ServiceKeePassFile         = "\\npefileshare.stl.nppcams.nestle.com\MSEDEPLOYMENT\KeePass\Databases\ServiceAccounts.kdbx"  # STL Example
+$Global:MSE_ServiceKeePassFileKey      = ""  #If you use a Key file as part of your authentication, enter the path to your key file here.
+
+### If you are using one KeePass file for multiple types of accounts, enter the correct kdbx file this function here.
+### Location of plant KeePass file to be used with Generic Application or Functional Logon Accounts
+$Global:MSE_ApplicationKeePassFile     = "\\npefileshare.stl.nppcams.nestle.com\tbkeepass\GenericApplications.kdbx"  # STL Example
+$Global:MSE_ApplicationKeePassFileKey  = ""  #If you use a Key file as part of your authentication, enter the path to your key file here.
+
+### If you are using one KeePass file for multiple types of accounts, enter the correct kdbx file this function here.
+### The following may not be implemented at the plants
+### Location of plant KeePass file to be used with Generic Application or Functional Logon Accounts
+$Global:MSE_WorkstationKeePassFile     = "\\npefileshare.stl.nppcams.nestle.com\tbkeepass\GenericWorkstations.kdbx"  # STL Example
+$Global:MSE_WorkstationKeePassFileKey  = ""  #If you use a Key file as part of your authentication, enter the path to your key file here.
+
+#Executable Home Directories
+$Global:MSE_KeePassDIR                 = "$($Global:MSE_MESSuiteRootUNC)\COMMON\PowerShell\KeePass"
+$Global:MSE_SigCheckDIR                = "$($Global:MSE_MESSuiteRootUNC)\COMMON\PowerShell\sigcheck"  # STL Example
+
+# Hash File Information
+# ID and Hash Files for access resources under PowerShell
+$Global:MSE_PasswordHashDirectory      = "$($Global:MSE_MESSuiteRootUNC)\PowerShell\HashFiles"
+

@@ -1,0 +1,45 @@
+#------------------------------------------------------------------------                                                                                                                                                                                                                                                                                                                                                                                                                     
+# Update-AD-ID-Departments.ps1
+# Author: Ron Gines
+# Version History
+#      1.0  -  Initial Version
+#              Date:    November 22, 2014
+#------------------------------------------------------------------------
+
+
+[CmdletBinding()]
+param(
+   [String]$Help
+)
+
+$Global:ResourceObjFull                = @()
+
+#Importing the functions to handle Active Directory
+Write-Host "Importing Active-Directory Module"
+Import-Module ac*
+
+#Loading Functions for this Script
+#Import-Module .\Change-PropertyFile-Modules
+Write-Host "Importing Common Properties"
+Import-Module NPECommonProperties.psm1
+
+#Loading Common Code
+#Import-Module \\usstll0032\share\rlg\MSEDeploy\ClusterConfigs\NPPC-Engineering-Common
+
+$UserIDList = import-csv .\Updated-AD-OU-ID-Memberships.csv 
+
+ForEach ($UID in $UserIDList)
+   {
+      Write-Host $UID
+      $Filter = "(SamAccountName -eq `"$($UID.SamAccountName)`")" 
+      $MyUser = Get-ADUser -SearchBase $NPPC_LDAPLMSContainer -Filter $Filter -Properties Department
+      Write-Host "A) $($UID.SamAccountName) B) $($MyUser.SamAccountName) C) $($UID.Department) D) $($MyUser.Department)" 
+      $MyUser.Department = $UID.Department
+      Set-ADUser -instance $MyUser
+      Write-Host "A) $($UID.SamAccountName) B) $($MyUser.SamAccountName) C) $($UID.Department) D) $($MyUser.Department)" 
+      Write-host "==="
+   }
+
+
+
+#Write-Host $_.SamAccountUser | Get-ADUser -LDAPFilter '(SamAccountName -eq $_.SamAccountName)' -Properties Department}

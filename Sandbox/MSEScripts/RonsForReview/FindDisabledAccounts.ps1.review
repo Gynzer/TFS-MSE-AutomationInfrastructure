@@ -1,0 +1,2 @@
+Import-Module ActiveDirectory
+Get-ADUser -Searchbase "OU=US-StLouis-HQ,OU=LMS Users and Groups,OU=NPPC AMS,OU=AMS,OU=Organizations,DC=nestle,dc=com" -Filter * -ResultSetSize 5000 | Select Name,Enabled,SamAccountName,ObjectClass | Sort Enabled,SamAccountName
